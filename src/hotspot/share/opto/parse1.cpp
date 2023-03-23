@@ -921,7 +921,11 @@ void Compile::return_values(JVMState* jvms) {
     kit.inc_sp(-ret_size);  // pop the return value(s)
     kit.sync_jvms();
     Node* res = kit.argument(0);
-    if (tf()->returns_inline_type_as_fields()) {
+    if (res->isa_InlineType() && VectorSupport::skip_value_scalarization(res->as_InlineType()->inline_klass())) {
+      InlineTypeNode* vt = res->as_InlineType();
+      assert(vt->is_buffered(), "");
+      ret->add_req(vt->get_oop());
+    } else if (tf()->returns_inline_type_as_fields()) {
       // Multiple return values (inline type fields): add as many edges
       // to the Return node as returned values.
       InlineTypeNode* vt = res->as_InlineType();
