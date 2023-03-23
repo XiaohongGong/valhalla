@@ -785,6 +785,15 @@ void InterpreterMacroAssembler::remove_activation(
 
     // Load fields from a buffered value with an inline class specific handler
     load_klass(rscratch1 /*dst*/, r0 /*src*/);
+
+    push(r0);
+
+    // Skip scalarization for vector value objects (concrete vectors and payloads).
+    super_call_VM_leaf(CAST_FROM_FN_PTR(address, SharedRuntime::is_vector_value_instance), rscratch1);
+    mov(rscratch2, r0);
+    pop(r0);
+    cbnz(rscratch2, skip);
+
     ldr(rscratch1, Address(rscratch1, InstanceKlass::adr_inlineklass_fixed_block_offset()));
     ldr(rscratch1, Address(rscratch1, InlineKlass::unpack_handler_offset()));
     // Unpack handler can be null if inline type is not scalarizable in returns
