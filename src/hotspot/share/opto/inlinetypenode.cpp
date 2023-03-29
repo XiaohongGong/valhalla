@@ -86,7 +86,7 @@ InlineTypeNode* InlineTypeNode::clone_with_phis(PhaseGVN* gvn, Node* region, boo
       value = value->as_InlineType()->clone_with_phis(gvn, region);
     } else {
       phi_type = Type::get_const_type(type);
-      if (vt->is_multifield_base(i)) {
+      if (vt->is_multifield_base(i) && vt->secondary_field_count(i) > 1) {
         phi_type = TypeVect::make(phi_type, vt->secondary_field_count(i));
       }
       value = PhiNode::make(region, value, phi_type);
@@ -422,16 +422,8 @@ void InlineTypeNode::load(GraphKit* kit, Node* base, Node* ptr, ciInstanceKlass*
           int vec_len = ft->bundle_size();
           BasicType elem_bt = ft->basic_type();
           bool bundle_size_supported = Matcher::vector_size_supported(elem_bt, vec_len);
-
-          // Set the vector length to maximal supported vector length
-          // to allow graceful compilation exit at a later stage.
-          vec_len = bundle_size_supported ? vec_len : Matcher::max_vector_size(elem_bt);
-
+          assert(bundle_size_supported, "bundle size is not supported");
           value = kit->gvn().transform(LoadVectorNode::make(0, kit->control(), kit->memory(adr), adr, adr_type, vec_len, elem_bt));
-
-          if (!bundle_size_supported) {
-            kit->env()->record_method_not_compilable("Mutifield bundle size not supported for target", false);
-          }
         } else {
           value = kit->access_load_at(base, adr, adr_type, val_type, bt, decorators);
         }
@@ -470,18 +462,9 @@ void InlineTypeNode::store(GraphKit* kit, Node* base, Node* ptr, ciInstanceKlass
         Node* adr = kit->basic_plus_adr(base, ptr, offset);
         int vec_len = kit->gvn().type(value)->is_vect()->length();
         BasicType elem_bt = kit->gvn().type(value)->is_vect()->element_basic_type();
-        bool bundle_size_supported = Matcher::vector_size_supported(elem_bt, vec_len);
-
-        // Set the vector length to  maximal supported vector length to allow
-        // graceful compilation exit at a later stage.
-        vec_len = bundle_size_supported ? vec_len : Matcher::max_vector_size(elem_bt);
-
+        assert(Matcher::vector_size_supported(elem_bt, vec_len), "");
         Node* store = kit->gvn().transform(StoreVectorNode::make(0, kit->control(), kit->memory(adr), adr, adr_type, value, vec_len));
         kit->set_memory(store, adr_type);
-
-        if (!bundle_size_supported) {
-          kit->env()->record_method_not_compilable("Mutifield bundle size not supported for target", false);
-        }
       } else {
         if (!value->is_InlineType()) {
           // Recursively store the flattened inline type field
@@ -504,13 +487,13 @@ void InlineTypeNode::store(GraphKit* kit, Node* base, Node* ptr, ciInstanceKlass
         int vec_len = ft->bundle_size();
         BasicType elem_bt = ft->basic_type();
 
-        bool bundle_size_supported =
-          Matcher::match_rule_supported_vector(Op_StoreVector, vec_len, elem_bt) &&
-          Matcher::match_rule_supported_vector(VectorNode::replicate_opcode(elem_bt), vec_len, elem_bt);
+        //bool bundle_size_supported =
+        //  Matcher::match_rule_supported_vector(Op_StoreVector, vec_len, elem_bt) &&
+        //  Matcher::match_rule_supported_vector(VectorNode::replicate_opcode(elem_bt), vec_len, elem_bt);
 
         // Set the vector length to  maximal supported vector length
         // to allow graceful compilation exit at a later stage.
-        vec_len = bundle_size_supported ? vec_len : Matcher::max_vector_size(elem_bt);
+        //vec_len = bundle_size_supported ? vec_len : Matcher::max_vector_size(elem_bt);
 
         // Handling for non-flattened case, with default InlineFieldMaxFlatSize of 128
         // all the concrete vectors should be fully flattened.
@@ -519,10 +502,6 @@ void InlineTypeNode::store(GraphKit* kit, Node* base, Node* ptr, ciInstanceKlass
 
         Node* store = kit->gvn().transform(StoreVectorNode::make(0, kit->control(), kit->memory(adr), adr, adr_type, value, vec_len));
         kit->set_memory(store, adr_type);
-
-        if (!bundle_size_supported) {
-          kit->env()->record_method_not_compilable("Mutifield bundle size not supported for target", false);
-        }
       } else {
         kit->access_store_at(base, adr, adr_type, value, val_type, bt, decorators);
       }
@@ -793,17 +772,17 @@ Node* InlineTypeNode::default_value(PhaseGVN& gvn, ciType* field_type) {
   if (field_type->bundle_size() > 1)  {
     int vec_len = field_type->bundle_size();
     BasicType elem_bt = field_type->basic_type();
-    bool bundle_size_supported =
-      Matcher::match_rule_supported_vector(VectorNode::replicate_opcode(elem_bt), vec_len, elem_bt);
+    //bool bundle_size_supported =
+    //  Matcher::match_rule_supported_vector(VectorNode::replicate_opcode(elem_bt), vec_len, elem_bt);
 
     // Set the vector length to  maximal supported vector length
     // to allow graceful compilation exit at a later stage.
-    vec_len = bundle_size_supported ? vec_len : Matcher::max_vector_size(elem_bt);
+    //vec_len = bundle_size_supported ? vec_len : Matcher::max_vector_size(elem_bt);
     value = gvn.transform(VectorNode::scalar2vector(value, vec_len, Type::get_const_type(field_type), false));
 
-    if (!bundle_size_supported) {
-        gvn.C->env()->record_method_not_compilable("Mutifield bundle size not supported for target", false);
-    }
+    //if (!bundle_size_supported) {
+    //    gvn.C->env()->record_method_not_compilable("Mutifield bundle size not supported for target", false);
+    //}
   }
   return value;
 }

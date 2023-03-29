@@ -95,7 +95,7 @@ class fieldDescriptor {
   inline u2   multifield_base()          const;
   inline jbyte multifield_index()        const;
   inline int secondary_fields_count(int base_idx) const;
-
+  inline bool is_vector_supported_multifield() const;
 
   bool is_synthetic()             const    { return access_flags().is_synthetic(); }
 

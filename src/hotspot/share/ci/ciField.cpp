@@ -301,7 +301,7 @@ void ciField::initialize_from(fieldDescriptor* fd) {
 
   _is_multifield = fd->is_multifield();
   _is_multifield_base = fd->is_multifield_base();
-  _secondary_fields_count = fd->secondary_fields_count(fd->index());
+  _secondary_fields_count = fd->is_multifield_base() ? fd->secondary_fields_count(fd->index()) : 1;
 
   // Check to see if the field is constant.
   Klass* k = _holder->get_Klass();

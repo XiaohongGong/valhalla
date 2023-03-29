@@ -187,7 +187,7 @@ public:
   bool is_transient            () const { return flags().is_transient(); }
   bool is_flattened            () const { return _is_flattened; }
   bool is_null_free            () const { return _is_null_free; }
-  bool is_multifield           () const { return _is_multifield; }
+  //bool is_multifield           () const { return _is_multifield; }
 
 
   // The field is modified outside of instance initializer methods
