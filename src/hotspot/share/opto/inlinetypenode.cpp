@@ -86,8 +86,8 @@ InlineTypeNode* InlineTypeNode::clone_with_phis(PhaseGVN* gvn, Node* region, boo
       value = value->as_InlineType()->clone_with_phis(gvn, region);
     } else {
       phi_type = Type::get_const_type(type);
-      if (vt->is_multifield_base(i) && vt->secondary_field_count(i) > 1) {
-        phi_type = TypeVect::make(phi_type, vt->secondary_field_count(i));
+      if (vt->secondary_fields_count(i) > 1) {
+        phi_type = TypeVect::make(phi_type, vt->secondary_fields_count(i));
       }
       value = PhiNode::make(region, value, phi_type);
       gvn->set_type(value, phi_type);
@@ -238,19 +238,12 @@ ciType* InlineTypeNode::field_type(uint index) const {
   return inline_klass()->declared_nonstatic_field_at(index)->type();
 }
 
-int InlineTypeNode::secondary_field_count(uint index) const {
-  assert(is_multifield_base(index), "non-multifield field at index");
-  return inline_klass()->declared_nonstatic_field_at(index)->secondary_fields_count();
-}
-
-bool InlineTypeNode::is_multifield(uint index) const {
+int InlineTypeNode::secondary_fields_count(uint index) const {
   assert(index < field_count(), "index out of bounds");
-  return inline_klass()->declared_nonstatic_field_at(index)->is_multifield();
-}
-
-bool InlineTypeNode::is_multifield_base(uint index) const {
-  assert(index < field_count(), "index out of bounds");
-  return inline_klass()->declared_nonstatic_field_at(index)->is_multifield_base();
+  if (inline_klass()->declared_nonstatic_field_at(index)->is_multifield_base()) {
+    return inline_klass()->declared_nonstatic_field_at(index)->secondary_fields_count();
+  }
+  return 1;
 }
 
 bool InlineTypeNode::field_is_flattened(uint index) const {

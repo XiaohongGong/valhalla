@@ -112,13 +112,10 @@ public:
   void          set_field_value(uint index, Node* value);
   void          set_field_value_by_offset(int offset, Node* value);
   int           field_offset(uint index) const;
-  bool          is_multifield(uint index) const;
-  bool          is_multifield_base(uint index) const;
-  int           secondary_field_count(uint index) const;
-  bool          is_multifield() const;
   ciType*       field_type(uint index) const;
   bool          field_is_flattened(uint index) const;
   bool          field_is_null_free(uint index) const;
+  int           secondary_fields_count(uint index) const;
 
   // Replace InlineTypeNodes in debug info at safepoints with SafePointScalarObjectNodes
   void make_scalar_in_safepoints(PhaseIterGVN* igvn, bool allow_oop = true);
