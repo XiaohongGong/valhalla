@@ -868,6 +868,10 @@ bool VectorNode::is_all_zeros_vector(Node* n) {
   case Op_ReplicateL:
   case Op_MaskAll:
     return is_con(n->in(1), 0);
+  case Op_ReplicateF:
+    return n->in(1)->bottom_type() == TypeF::ZERO;
+  case Op_ReplicateD:
+    return n->in(1)->bottom_type() == TypeD::ZERO;
   default:
     return false;
   }

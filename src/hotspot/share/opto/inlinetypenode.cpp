@@ -479,20 +479,8 @@ void InlineTypeNode::store(GraphKit* kit, Node* base, Node* ptr, ciInstanceKlass
       if (ft->bundle_size() > 1) {
         int vec_len = ft->bundle_size();
         BasicType elem_bt = ft->basic_type();
-
-        //bool bundle_size_supported =
-        //  Matcher::match_rule_supported_vector(Op_StoreVector, vec_len, elem_bt) &&
-        //  Matcher::match_rule_supported_vector(VectorNode::replicate_opcode(elem_bt), vec_len, elem_bt);
-
-        // Set the vector length to  maximal supported vector length
-        // to allow graceful compilation exit at a later stage.
-        //vec_len = bundle_size_supported ? vec_len : Matcher::max_vector_size(elem_bt);
-
-        // Handling for non-flattened case, with default InlineFieldMaxFlatSize of 128
-        // all the concrete vectors should be fully flattened.
         value = value->bottom_type()->isa_vect() ? value : kit->gvn().transform(VectorNode::scalar2vector(value, vec_len, val_type, false));
         assert(value->bottom_type()->isa_vect() && value->bottom_type()->is_vect()->length() == (uint)ft->bundle_size(), "");
-
         Node* store = kit->gvn().transform(StoreVectorNode::make(0, kit->control(), kit->memory(adr), adr, adr_type, value, vec_len));
         kit->set_memory(store, adr_type);
       } else {
@@ -765,17 +753,7 @@ Node* InlineTypeNode::default_value(PhaseGVN& gvn, ciType* field_type) {
   if (field_type->bundle_size() > 1)  {
     int vec_len = field_type->bundle_size();
     BasicType elem_bt = field_type->basic_type();
-    //bool bundle_size_supported =
-    //  Matcher::match_rule_supported_vector(VectorNode::replicate_opcode(elem_bt), vec_len, elem_bt);
-
-    // Set the vector length to  maximal supported vector length
-    // to allow graceful compilation exit at a later stage.
-    //vec_len = bundle_size_supported ? vec_len : Matcher::max_vector_size(elem_bt);
     value = gvn.transform(VectorNode::scalar2vector(value, vec_len, Type::get_const_type(field_type), false));
-
-    //if (!bundle_size_supported) {
-    //    gvn.C->env()->record_method_not_compilable("Mutifield bundle size not supported for target", false);
-    //}
   }
   return value;
 }
