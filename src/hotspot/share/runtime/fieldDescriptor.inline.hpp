@@ -96,7 +96,7 @@ inline jbyte fieldDescriptor::multifield_index() const { return  field_holder()-
 
 inline int fieldDescriptor::secondary_fields_count(int base_idx) const {
   Array<MultiFieldInfo>* multifield_info = field_holder()->multifield_info();
-  if (!is_multifield_base() || !is_multifield() || NULL == multifield_info) {
+  if (!(is_multifield_base() || is_multifield()) || NULL == multifield_info) {
     return 1;
   }
 

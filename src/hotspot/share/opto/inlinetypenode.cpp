@@ -450,40 +450,28 @@ void InlineTypeNode::store(GraphKit* kit, Node* base, Node* ptr, ciInstanceKlass
     Node* value = field_value(i);
     ciType* ft = field_type(i);
     if (field_is_flattened(i)) {
-      if (kit->gvn().type(value)->isa_vect()) {
-        const TypePtr* adr_type = field_adr_type(base, offset, holder, decorators, kit->gvn());
-        Node* adr = kit->basic_plus_adr(base, ptr, offset);
-        int vec_len = kit->gvn().type(value)->is_vect()->length();
-        BasicType elem_bt = kit->gvn().type(value)->is_vect()->element_basic_type();
-        assert(Matcher::vector_size_supported(elem_bt, vec_len), "");
-        Node* store = kit->gvn().transform(StoreVectorNode::make(0, kit->control(), kit->memory(adr), adr, adr_type, value, vec_len));
-        kit->set_memory(store, adr_type);
-      } else {
-        if (!value->is_InlineType()) {
-          // Recursively store the flattened inline type field
-          value = InlineTypeNode::make_from_oop(kit, value, ft->as_inline_klass());
-        }
-        value->as_InlineType()->store_flattened(kit, base, ptr, holder, offset, decorators);
+      if (!value->is_InlineType()) {
+        // Recursively store the flattened inline type field
+        value = InlineTypeNode::make_from_oop(kit, value, ft->as_inline_klass());
       }
+      value->as_InlineType()->store_flattened(kit, base, ptr, holder, offset, decorators);
     } else {
       // Store field value to memory
       const TypePtr* adr_type = field_adr_type(base, offset, holder, decorators, kit->gvn());
       Node* adr = kit->basic_plus_adr(base, ptr, offset);
       BasicType bt = type2field[ft->basic_type()];
       assert(is_java_primitive(bt) || adr->bottom_type()->is_ptr_to_narrowoop() == UseCompressedOops, "inconsistent");
-      const Type* val_type = Type::get_const_type(ft);
-      const TypeAryPtr* ary_type = kit->gvn().type(base)->isa_aryptr();
-      if (ary_type != NULL) {
-        decorators |= IS_ARRAY;
-      }
       if (ft->bundle_size() > 1) {
         int vec_len = ft->bundle_size();
-        BasicType elem_bt = ft->basic_type();
-        value = value->bottom_type()->isa_vect() ? value : kit->gvn().transform(VectorNode::scalar2vector(value, vec_len, val_type, false));
-        assert(value->bottom_type()->isa_vect() && value->bottom_type()->is_vect()->length() == (uint)ft->bundle_size(), "");
+        assert(value->bottom_type()->isa_vect() && value->bottom_type()->is_vect()->length() == (uint) vec_len, "");
         Node* store = kit->gvn().transform(StoreVectorNode::make(0, kit->control(), kit->memory(adr), adr, adr_type, value, vec_len));
         kit->set_memory(store, adr_type);
       } else {
+        const Type* val_type = Type::get_const_type(ft);
+        const TypeAryPtr* ary_type = kit->gvn().type(base)->isa_aryptr();
+        if (ary_type != NULL) {
+          decorators |= IS_ARRAY;
+        }
         kit->access_store_at(base, adr, adr_type, value, val_type, bt, decorators);
       }
     }
