@@ -238,7 +238,7 @@ int InlineKlass::collect_fields(GrowableArray<SigEntry>* sig, int base_off) {
   SigEntry::add_entry(sig, T_PRIMITIVE_OBJECT, name(), base_off);
   for (JavaFieldStream fs(this); !fs.done(); fs.next()) {
     if (fs.access_flags().is_static()) continue;
-    if (fs.is_multifield()) continue;
+    if (fs.field_descriptor().is_vector_supported_multifield()) continue;
     int offset = base_off + fs.offset() - (base_off > 0 ? first_field_offset() : 0);
     if (fs.is_inlined()) {
       // Resolve klass of inlined field and recursively collect fields

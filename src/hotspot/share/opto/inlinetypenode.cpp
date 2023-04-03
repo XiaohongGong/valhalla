@@ -34,7 +34,6 @@
 #include "opto/phaseX.hpp"
 #include "opto/vectornode.hpp"
 
-
 uint InlineTypeNode::size_of() const {
   return sizeof(*this);
 }
@@ -414,8 +413,7 @@ void InlineTypeNode::load(GraphKit* kit, Node* base, Node* ptr, ciInstanceKlass*
         if (ft->bundle_size() > 1) {
           int vec_len = ft->bundle_size();
           BasicType elem_bt = ft->basic_type();
-          bool bundle_size_supported = Matcher::vector_size_supported(elem_bt, vec_len);
-          assert(bundle_size_supported, "bundle size is not supported");
+          assert(Matcher::vector_size_supported(elem_bt, vec_len), "vector size is not supported");
           value = kit->gvn().transform(LoadVectorNode::make(0, kit->control(), kit->memory(adr), adr, adr_type, vec_len, elem_bt));
         } else {
           value = kit->access_load_at(base, adr, adr_type, val_type, bt, decorators);
@@ -450,8 +448,8 @@ void InlineTypeNode::store(GraphKit* kit, Node* base, Node* ptr, ciInstanceKlass
     Node* value = field_value(i);
     ciType* ft = field_type(i);
     if (field_is_flattened(i)) {
+      // Recursively store the flattened inline type field
       if (!value->is_InlineType()) {
-        // Recursively store the flattened inline type field
         value = InlineTypeNode::make_from_oop(kit, value, ft->as_inline_klass());
       }
       value->as_InlineType()->store_flattened(kit, base, ptr, holder, offset, decorators);
@@ -741,6 +739,7 @@ Node* InlineTypeNode::default_value(PhaseGVN& gvn, ciType* field_type) {
   if (field_type->bundle_size() > 1)  {
     int vec_len = field_type->bundle_size();
     BasicType elem_bt = field_type->basic_type();
+    assert(Matcher::vector_size_supported(elem_bt, vec_len), "vector size is not supported");
     value = gvn.transform(VectorNode::scalar2vector(value, vec_len, Type::get_const_type(field_type), false));
   }
   return value;
@@ -1066,8 +1065,8 @@ void InlineTypeNode::initialize_fields(GraphKit* kit, MultiNode* multi, uint& ba
   }
 
   for (uint i = 0; i < field_count(); ++i) {
-    Node* parm = NULL;
     ciType* type = field_type(i);
+    Node* parm = NULL;
     if (field_is_flattened(i)) {
       // Flattened inline type field
       InlineTypeNode* vt = make_uninitialized(gvn, type->as_inline_klass());

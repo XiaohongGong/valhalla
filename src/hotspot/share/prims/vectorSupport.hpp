@@ -25,13 +25,13 @@
 #ifndef SHARE_PRIMS_VECTORSUPPORT_HPP
 #define SHARE_PRIMS_VECTORSUPPORT_HPP
 
+#include "ci/ciKlass.hpp"
 #include "code/debugInfo.hpp"
 #include "jni.h"
 #include "memory/allStatic.hpp"
 #include "oops/typeArrayOop.hpp"
 #include "runtime/registerMap.hpp"
 #include "utilities/exceptions.hpp"
-#include "ci/ciKlass.hpp"
 
 extern "C" {
   void JNICALL JVM_RegisterVectorSupportMethods(JNIEnv* env, jclass vsclass);

@@ -975,9 +975,6 @@ void PhaseChaitin::gather_lrg_masks( bool after_aggressive ) {
         case Op_VecX:
           assert(Matcher::vector_size_supported(T_FLOAT,RegMask::SlotsPerVecX), "sanity");
           assert(RegMask::num_registers(Op_VecX) == RegMask::SlotsPerVecX, "sanity");
-          if (!lrgmask.is_aligned_sets(RegMask::SlotsPerVecX)) {
-            lrgmask.dump();
-          }
           assert(lrgmask.is_aligned_sets(RegMask::SlotsPerVecX), "vector should be aligned");
           lrg.set_num_regs(RegMask::SlotsPerVecX);
           lrg.set_reg_pressure(1);
