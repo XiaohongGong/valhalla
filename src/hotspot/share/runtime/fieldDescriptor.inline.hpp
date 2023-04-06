@@ -30,6 +30,10 @@
 #include "runtime/handles.inline.hpp"
 #include "runtime/signature.hpp"
 
+#ifdef COMPILER2
+#include "opto/matcher.hpp"
+#endif // COMPILER2
+
 // All fieldDescriptor inline functions that (directly or indirectly) use "_cp()" or "_cp->"
 // must be put in this file, as they require runtime/handles.inline.hpp.
 
@@ -85,8 +89,34 @@ inline BasicType fieldDescriptor::field_type() const {
 inline bool fieldDescriptor::is_inlined()  const  { return field()->is_inlined(); }
 inline bool fieldDescriptor::is_inline_type() const { return Signature::basic_type(field()->signature(_cp())) == T_PRIMITIVE_OBJECT; }
 
-inline bool fieldDescriptor::is_multifield() const { return field()->is_multifield(); };
+inline bool fieldDescriptor::is_multifield() const { return field()->is_multifield(); }
+inline bool fieldDescriptor::is_multifield_base() const { return field()->is_multifield_base(); }
 inline u2   fieldDescriptor::multifield_base() const { return field_holder()->multifield_info(field()->secondary_index()).base_index(); }
 inline jbyte fieldDescriptor::multifield_index() const { return  field_holder()->multifield_info(field()->secondary_index()).multifield_index(); }
+
+inline int fieldDescriptor::secondary_fields_count(int base_idx) const {
+  Array<MultiFieldInfo>* multifield_info = field_holder()->multifield_info();
+  if (!(is_multifield_base() || is_multifield()) || NULL == multifield_info) {
+    return 1;
+  }
+
+  int sec_fields_count = 1;
+#ifdef COMPILER2
+  for (int i = 0; i < multifield_info->length(); i++) {
+    if (field_holder()->multifield_info(i).base_index() == base_idx) {
+      sec_fields_count++;
+    }
+  }
+  BasicType bt = field_type();
+  if (!Matcher::vector_size_supported(bt, sec_fields_count)) {
+    sec_fields_count = 1;
+  }
+#endif
+  return sec_fields_count;
+}
+
+inline bool fieldDescriptor::is_vector_supported_multifield() const {
+  return is_multifield() && secondary_fields_count(multifield_base()) != 1;
+}
 
 #endif // SHARE_RUNTIME_FIELDDESCRIPTOR_INLINE_HPP

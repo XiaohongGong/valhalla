@@ -25,6 +25,7 @@
 #ifndef SHARE_PRIMS_VECTORSUPPORT_HPP
 #define SHARE_PRIMS_VECTORSUPPORT_HPP
 
+#include "ci/ciKlass.hpp"
 #include "code/debugInfo.hpp"
 #include "jni.h"
 #include "memory/allStatic.hpp"
@@ -146,7 +147,12 @@ class VectorSupport : AllStatic {
   static instanceOop allocate_vector(InstanceKlass* holder, frame* fr, RegisterMap* reg_map, ObjectValue* sv, TRAPS);
 
   static bool is_vector(Klass* klass);
+  static bool is_vector(ciKlass* klass);
+  static bool is_vector_payload_mf(Klass* klass);
+  static bool is_vector_payload_mf(ciKlass* klass);
   static bool is_vector_mask(Klass* klass);
   static bool is_vector_shuffle(Klass* klass);
+  static bool skip_value_scalarization(ciKlass* klass);
+  static bool skip_value_scalarization(Klass* klass);
 };
 #endif // SHARE_PRIMS_VECTORSUPPORT_HPP

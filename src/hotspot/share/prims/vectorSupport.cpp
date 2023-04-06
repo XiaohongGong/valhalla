@@ -25,6 +25,7 @@
 #include "precompiled.hpp"
 #include "classfile/javaClasses.inline.hpp"
 #include "classfile/vmClasses.hpp"
+#include "classfile/vmClassMacros.hpp"
 #include "classfile/vmSymbols.hpp"
 #include "code/location.hpp"
 #include "jni.h"
@@ -65,9 +66,22 @@ const char* VectorSupport::svmlname[VectorSupport::NUM_SVML_OP] = {
 };
 #endif
 
-bool VectorSupport::is_vector(Klass* klass) {
-  return klass->is_subclass_of(vmClasses::vector_VectorPayload_klass());
+bool VectorSupport::is_vector(ciKlass* klass) {
+  return klass->is_subclass_of(ciEnv::current()->vector_Vector_klass());
 }
+
+bool VectorSupport::is_vector(Klass* klass) {
+  return klass->is_subclass_of(vmClasses::vector_Vector_klass());
+}
+
+bool VectorSupport::is_vector_payload_mf(ciKlass* klass) {
+  return klass->is_subclass_of(ciEnv::current()->vector_VectorPayloadMF_klass());
+}
+
+bool VectorSupport::is_vector_payload_mf(Klass* klass) {
+  return klass->is_subclass_of(vmClasses::vector_VectorPayloadMF_klass());
+}
+
 
 bool VectorSupport::is_vector_mask(Klass* klass) {
   return klass->is_subclass_of(vmClasses::vector_VectorMask_klass());
@@ -75,6 +89,14 @@ bool VectorSupport::is_vector_mask(Klass* klass) {
 
 bool VectorSupport::is_vector_shuffle(Klass* klass) {
   return klass->is_subclass_of(vmClasses::vector_VectorShuffle_klass());
+}
+
+bool VectorSupport::skip_value_scalarization(ciKlass* klass) {
+  return VectorSupport::is_vector(klass) || VectorSupport::is_vector_payload_mf(klass);
+}
+
+bool VectorSupport::skip_value_scalarization(Klass* klass) {
+  return VectorSupport::is_vector(klass) || VectorSupport::is_vector_payload_mf(klass);
 }
 
 BasicType VectorSupport::klass2bt(InstanceKlass* ik) {

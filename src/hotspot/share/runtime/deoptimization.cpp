@@ -1371,16 +1371,54 @@ public:
   int _offset;
   BasicType _type;
   InstanceKlass* _klass;
+  int _secondary_fields_count;
 public:
   ReassignedField() {
     _offset = 0;
     _type = T_ILLEGAL;
     _klass = NULL;
+    _secondary_fields_count = 0;
   }
 };
 
 int compare(ReassignedField* left, ReassignedField* right) {
   return left->_offset - right->_offset;
+}
+
+static void init_multi_field(oop obj, int offset, BasicType elem_bt, address addr) {
+  switch (elem_bt) {
+    case T_BOOLEAN: obj->bool_field_put(offset, *(jboolean*)addr); break;
+    case T_BYTE:    obj->byte_field_put(offset, *(jbyte*)addr); break;
+    case T_SHORT:   obj->short_field_put(offset, *(jshort*)addr); break;
+    case T_INT:     obj->int_field_put(offset, *(jint*)addr); break;
+    case T_FLOAT:   obj->float_field_put(offset, *(jfloat*)addr); break;
+    case T_LONG:    obj->long_field_put(offset, *(jlong*)addr); break;
+    case T_DOUBLE:  obj->double_field_put(offset, *(jdouble*)addr); break;
+    default: fatal("unsupported: %s", type2name(elem_bt));
+  }
+}
+
+static void reassign_multi_fields(frame* fr, RegisterMap* reg_map, Location location, oop obj, int offset, BasicType elem_bt, int fields_count) {
+  int elem_size = type2aelembytes(elem_bt);
+  if (location.is_register()) {
+    // Value was in a callee-saved register.
+    VMReg vreg = VMRegImpl::as_VMReg(location.register_number());
+
+    for (int i = 0; i < fields_count; i++) {
+      int vslot = (i * elem_size) / VMRegImpl::stack_slot_size;
+      int off   = (i * elem_size) % VMRegImpl::stack_slot_size;
+      address elem_addr = reg_map->location(vreg, vslot) + off; // assumes little endian element order
+      int second_offset = offset + i * elem_size;
+      init_multi_field(obj, second_offset, elem_bt, elem_addr);
+    }
+  } else {
+    // Value was directly saved on the stack.
+    address base_addr = ((address)fr->unextended_sp()) + location.stack_offset();
+    for (int i = 0; i < fields_count; i++) {
+      int second_offset = offset + i * elem_size;
+      init_multi_field(obj, second_offset, elem_bt, base_addr + i * elem_size);
+    }
+  }
 }
 
 // Restore fields of an eliminated instance object using the same field order
@@ -1390,10 +1428,11 @@ static int reassign_fields_by_klass(InstanceKlass* klass, frame* fr, RegisterMap
   InstanceKlass* ik = klass;
   while (ik != NULL) {
     for (AllFieldStream fs(ik); !fs.done(); fs.next()) {
-      if (!fs.access_flags().is_static() && (!skip_internal || !fs.access_flags().is_internal())) {
+      if (!fs.access_flags().is_static() && !fs.field_descriptor().is_vector_supported_multifield() && (!skip_internal || !fs.access_flags().is_internal())) {
         ReassignedField field;
         field._offset = fs.offset();
         field._type = Signature::basic_type(fs.signature());
+        field._secondary_fields_count = fs.is_multifield_base() ? fs.field_descriptor().secondary_fields_count(fs.index()) : 1;
         if (fs.signature()->is_Q_signature()) {
           if (fs.is_inlined()) {
             // Resolve klass of flattened inline type field
@@ -1420,8 +1459,18 @@ static int reassign_fields_by_klass(InstanceKlass* klass, frame* fr, RegisterMap
       svIndex = reassign_fields_by_klass(vk, fr, reg_map, sv, svIndex, obj, skip_internal, offset, CHECK_0);
       continue; // Continue because we don't need to increment svIndex
     }
-    intptr_t val;
+
     ScopeValue* scope_field = sv->field_at(svIndex);
+    Location location = ((LocationValue *)scope_field)->location();
+    int secondary_fields_count = fields->at(i)._secondary_fields_count;
+    if (secondary_fields_count > 1 && location.type() == Location::vector) {
+      // Re-assign vectorized multi-fields
+      reassign_multi_fields(fr, reg_map, location, obj, offset, type, secondary_fields_count);
+      svIndex++;
+      continue;
+    }
+
+    intptr_t val;
     StackValue* value = StackValue::create_stack_value(fr, reg_map, scope_field);
     switch (type) {
       case T_OBJECT:
