@@ -1681,13 +1681,18 @@ class VectorBoxNode : public InlineTypeNode {
   static VectorBoxNode* make_box_node(PhaseGVN& gvn, Compile* C, Node* box, Node* val,
                                       const TypeInstPtr* box_type, const TypeVect* vt) {
     ciInlineKlass* vk = static_cast<ciInlineKlass*>(box_type->inline_klass());
-    VectorBoxNode* box_node = new VectorBoxNode(vk, box, true, vk->is_empty() && vk->is_initialized());
+    ciInlineKlass* payload = vk->declared_nonstatic_field_at(0)->type()->as_inline_klass();
+    Node* payload_oop = payload->is_initialized() ? default_oop(gvn, payload) : gvn.zerocon(T_PRIMITIVE_OBJECT);
+    Node* payload_value = InlineTypeNode::make_uninitialized(gvn, payload, true);
+    payload_value->as_InlineType()->set_field_value(0, val);
+    payload_value = gvn.transform(payload_value);
+    VectorBoxNode* box_node = new VectorBoxNode(vk, box, false, vk->is_empty() && vk->is_initialized());
     box_node->set_is_init(gvn);
     box_node->set_vec_type(vt);
     box_node->set_box_type(box_type);
     box_node->init_flags(Flag_is_macro);
     box_node->init_class_id(Class_VectorBox);
-    box_node->init_req(InlineTypeNode::Values, val);
+    box_node->set_field_value(0, payload_value);
     C->add_macro_node(box_node);
 
     return box_node;
@@ -1695,7 +1700,7 @@ class VectorBoxNode : public InlineTypeNode {
 
   const  TypeInstPtr* box_type() const { assert(_box_type != NULL, ""); return _box_type; };
   const  TypeVect*    vec_type() const { assert(_vec_type != NULL, ""); return _vec_type; };
-  Node*  get_vec() { return field_value(0); }
+  Node*  get_vec() { return field_value(0)->as_InlineType()->field_value(0); }
 
   virtual int Opcode() const;
   virtual const Type* bottom_type() const { return _box_type; }
@@ -1709,6 +1714,7 @@ class VectorBoxAllocateNode : public CallStaticJavaNode {
  public:
   VectorBoxAllocateNode(Compile* C, const TypeInstPtr* vbox_type)
     : CallStaticJavaNode(C, VectorBoxNode::vec_box_type(vbox_type), NULL, NULL) {
+    init_class_id(Class_VectorBoxAllocate);
     init_flags(Flag_is_macro);
     C->add_macro_node(this);
   }

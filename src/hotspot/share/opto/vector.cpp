@@ -314,182 +314,31 @@ void PhaseVector::scalarize_vbox_node(VectorBoxNode* vec_box) {
 
 void PhaseVector::expand_vbox_node(VectorBoxNode* vec_box) {
   if (vec_box->outcnt() > 0) {
-    Node* vbox = vec_box->get_oop();
-    Node* vect = vec_box->get_vec();
-    Node* result = expand_vbox_node_helper(vec_box, vbox, vect, vec_box->box_type(), vec_box->vec_type());
-    C->gvn_replace_by(vec_box, result);
+    Node* vbox_alloc = vec_box->get_oop();
+    assert(vbox_alloc->is_Proj() && vbox_alloc->in(0)->isa_VectorBoxAllocate(), "");
+    VectorBoxAllocateNode* vba = vbox_alloc->in(0)->as_VectorBoxAllocate();
+
+    JVMState* jvms = clone_jvms(C, vba);
+    GraphKit kit(jvms);
+
+    ciInlineKlass* vk = vec_box->inline_klass();
+    Node* klass_node = kit.makecon(TypeKlassPtr::make(vk));
+    Node* alloc_oop  = kit.new_instance(klass_node, NULL, NULL, /* deoptimize_on_exception */ true, vec_box);
+    vec_box->store(&kit, alloc_oop, alloc_oop, vk);
+
+    // Do not let stores that initialize this buffer be reordered with a subsequent
+    // store that would make this buffer accessible by other threads.
+    AllocateNode* alloc = AllocateNode::Ideal_allocation(alloc_oop, &kit.gvn());
+    assert(alloc != NULL, "must have an allocation node");
+    kit.insert_mem_bar(Op_MemBarStoreStore, alloc->proj_out_or_null(AllocateNode::RawAddress));
+
+    kit.replace_call(vba, alloc_oop, true);
+    C->remove_macro_node(vba);
+
+    C->gvn_replace_by(vec_box, alloc_oop);
     C->print_method(PHASE_EXPAND_VBOX, 3, vec_box);
   }
   C->remove_macro_node(vec_box);
-}
-
-Node* PhaseVector::expand_vbox_node_helper(Node* vec_box,
-                                           Node* vbox,
-                                           Node* vect,
-                                           const TypeInstPtr* box_type,
-                                           const TypeVect* vect_type) {
-  if (vbox->is_Phi() && vect->is_Phi()) {
-    assert(vbox->as_Phi()->region() == vect->as_Phi()->region(), "");
-    Node* new_phi = new PhiNode(vbox->as_Phi()->region(), box_type);
-    for (uint i = 1; i < vbox->req(); i++) {
-      Node* new_box = expand_vbox_node_helper(vec_box, vbox->in(i), vect->in(i), box_type, vect_type);
-      new_phi->set_req(i, new_box);
-    }
-    new_phi = C->initial_gvn()->transform(new_phi);
-    return new_phi;
-  } else if (vbox->is_Phi() && (vect->is_Vector() || vect->is_LoadVector())) {
-    // Handle the case when the allocation input to VectorBoxNode is a phi
-    // but the vector input is not, which can definitely be the case if the
-    // vector input has been value-numbered. It seems to be safe to do by
-    // construction because VectorBoxNode and VectorBoxAllocate come in a
-    // specific order as a result of expanding an intrinsic call. After that, if
-    // any of the inputs to VectorBoxNode are value-numbered they can only
-    // move up and are guaranteed to dominate.
-    Node* new_phi = new PhiNode(vbox->as_Phi()->region(), box_type);
-    for (uint i = 1; i < vbox->req(); i++) {
-      Node* new_box = expand_vbox_node_helper(vec_box, vbox->in(i), vect, box_type, vect_type);
-      new_phi->set_req(i, new_box);
-    }
-    new_phi = C->initial_gvn()->transform(new_phi);
-    return new_phi;
-  } else if (vbox->is_Proj() && vbox->in(0)->Opcode() == Op_VectorBoxAllocate) {
-    VectorBoxAllocateNode* vbox_alloc = static_cast<VectorBoxAllocateNode*>(vbox->in(0));
-    return expand_vbox_alloc_node(vec_box, vbox_alloc, vect, box_type, vect_type);
-  } else {
-    assert(!vbox->is_Phi(), "");
-    // TODO: assert that expanded vbox is initialized with the same value (vect).
-    return vbox; // already expanded
-  }
-}
-
-Node* PhaseVector::expand_vbox_alloc_node_mf(Node* vbox,
-                                             VectorBoxAllocateNode* vbox_alloc,
-                                             Node* value,
-                                             const TypeInstPtr* box_type,
-                                             const TypeVect* vect_type) {
-  assert(vbox->isa_InlineType(), "");
-  JVMState* jvms = clone_jvms(C, vbox_alloc);
-  GraphKit kit(jvms);
-  PhaseGVN& gvn = kit.gvn();
-
-  ciInstanceKlass* box_klass = box_type->instance_klass();
-  BasicType bt = vect_type->element_basic_type();
-  int num_elem = vect_type->length();
-  int elem_size = type2aelembytes(bt);
-
-  const TypeKlassPtr* klass_type = box_type->as_klass_type();
-  Node* klass_node = kit.makecon(klass_type);
-  Node* buffer_mem = kit.new_instance(klass_node, NULL, NULL, /* deoptimize_on_exception */ true, vbox->as_InlineType());
-  // TODO: Re-use existing value storage routine from InlineTypeNode.
-  //vbox->as_InlineType()->store(&kit, buffer, buffer, box_klass);
-
-  // Store the vector value into the array.
-  // (The store should be captured by InitializeNode and turned into initialized store later.)
-  ciSymbol* payload_sig = ciSymbol::make(VectorSupport::get_vector_payload_field_signature(bt, num_elem)->as_C_string());
-  ciSymbol* payload_name = ciSymbol::make(vmSymbols::payload_name()->as_C_string());
-  ciField* payload = box_klass->get_field_by_name(payload_name, payload_sig, false);
-
-  Node* buffer_start_adr = kit.basic_plus_adr(buffer_mem, payload->offset());
-  const TypePtr* buffer_adr_type = buffer_start_adr->bottom_type()->is_ptr();
-  Node* buffer_mem_start = kit.memory(buffer_start_adr);
-  Node* vstore = gvn.transform(StoreVectorNode::make(0,
-                                                     kit.control(),
-                                                     buffer_mem_start,
-                                                     buffer_start_adr,
-                                                     buffer_adr_type,
-                                                     value,
-                                                     num_elem));
-  // TODO: With respect to aliasing behaviour multi-field alias type should be same as that of
-  // array, since multi-field is a bundle of scalars. An alias type determines the size of
-  // memory slice updated in global memory at a particular alias index, subsequent memory read
-  // with same alias type can directly fetch the value thus saving an extra load operation.
-  kit.set_memory(vstore, buffer_adr_type);
-
-  C->set_max_vector_size(MAX2(C->max_vector_size(), vect_type->length_in_bytes()));
-
-  kit.replace_call(vbox_alloc, buffer_mem, true);
-  C->remove_macro_node(vbox_alloc);
-
-  return buffer_mem;
-}
-
-
-Node* PhaseVector::expand_vbox_alloc_node(Node* vbox,
-                                          VectorBoxAllocateNode* vbox_alloc,
-                                          Node* value,
-                                          const TypeInstPtr* box_type,
-                                          const TypeVect* vect_type) {
-  ciInstanceKlass* box_klass = box_type->instance_klass();
-  if (is_vector(box_klass)) {
-    return expand_vbox_alloc_node_mf(vbox, vbox_alloc, value, box_type, vect_type);
-  }
-
-  JVMState* jvms = clone_jvms(C, vbox_alloc);
-  GraphKit kit(jvms);
-  PhaseGVN& gvn = kit.gvn();
-
-  BasicType bt = vect_type->element_basic_type();
-  int num_elem = vect_type->length();
-
-  bool is_mask = is_vector_mask(box_klass);
-  // If boxed mask value is present in a predicate register, it must be
-  // spilled to a vector though a VectorStoreMaskOperation before actual StoreVector
-  // operation to vector payload field.
-  if (is_mask && (value->bottom_type()->isa_vectmask() || bt != T_BOOLEAN)) {
-    value = gvn.transform(VectorStoreMaskNode::make(gvn, value, bt, num_elem));
-    // Although type of mask depends on its definition, in terms of storage everything is stored in boolean array.
-    bt = T_BOOLEAN;
-    assert(value->bottom_type()->is_vect()->element_basic_type() == bt,
-           "must be consistent with mask representation");
-  }
-
-  // Generate array allocation for the field which holds the values.
-  const TypeKlassPtr* array_klass = TypeKlassPtr::make(ciTypeArrayKlass::make(bt));
-  Node* arr = kit.new_array(kit.makecon(array_klass), kit.intcon(num_elem), 1);
-
-  // Store the vector value into the array.
-  // (The store should be captured by InitializeNode and turned into initialized store later.)
-  Node* arr_adr = kit.array_element_address(arr, kit.intcon(0), bt);
-  const TypePtr* arr_adr_type = arr_adr->bottom_type()->is_ptr();
-  Node* arr_mem = kit.memory(arr_adr);
-  Node* vstore = gvn.transform(StoreVectorNode::make(0,
-                                                     kit.control(),
-                                                     arr_mem,
-                                                     arr_adr,
-                                                     arr_adr_type,
-                                                     value,
-                                                     num_elem));
-  kit.set_memory(vstore, arr_adr_type);
-
-  C->set_max_vector_size(MAX2(C->max_vector_size(), vect_type->length_in_bytes()));
-
-  // Generate the allocate for the Vector object.
-  const TypeKlassPtr* klass_type = box_type->as_klass_type();
-  Node* klass_node = kit.makecon(klass_type);
-  Node* vec_obj = kit.new_instance(klass_node);
-
-  // Store the allocated array into object.
-  ciField* field = ciEnv::current()->vector_VectorPayload_klass()->get_field_by_name(ciSymbols::payload_name(),
-                                                                                     ciSymbols::object_signature(),
-                                                                                     false);
-  assert(field != NULL, "");
-  Node* vec_field = kit.basic_plus_adr(vec_obj, field->offset_in_bytes());
-  const TypePtr* vec_adr_type = vec_field->bottom_type()->is_ptr();
-
-  // The store should be captured by InitializeNode and turned into initialized store later.
-  Node* field_store = gvn.transform(kit.access_store_at(vec_obj,
-                                                        vec_field,
-                                                        vec_adr_type,
-                                                        arr,
-                                                        TypeOopPtr::make_from_klass(field->type()->as_klass()),
-                                                        T_OBJECT,
-                                                        IN_HEAP));
-  kit.set_memory(field_store, vec_adr_type);
-
-  kit.replace_call(vbox_alloc, vec_obj, true);
-  C->remove_macro_node(vbox_alloc);
-
-  return vec_obj;
 }
 
 Node* PhaseVector::get_loaded_payload(VectorUnboxNode* vec_unbox) {

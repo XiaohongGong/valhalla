@@ -41,16 +41,6 @@ class PhaseVector : public Phase {
                                 Node* vect,
                                 const TypeInstPtr* box_type,
                                 const TypeVect* vect_type);
-  Node* expand_vbox_alloc_node(Node* vbox,
-                               VectorBoxAllocateNode* vbox_alloc,
-                               Node* value,
-                               const TypeInstPtr* box_type,
-                               const TypeVect* vect_type);
-  Node* expand_vbox_alloc_node_mf(Node* vbox,
-                                  VectorBoxAllocateNode* vbox_alloc,
-                                  Node* value,
-                                  const TypeInstPtr* box_type,
-                                  const TypeVect* vect_type);
   Node* get_loaded_payload(VectorUnboxNode* vec_unbox);
 
   void scalarize_vbox_nodes();
