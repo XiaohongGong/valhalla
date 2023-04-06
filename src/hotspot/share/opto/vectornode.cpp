@@ -28,6 +28,7 @@
 #include "opto/subnode.hpp"
 #include "opto/vectornode.hpp"
 #include "opto/convertnode.hpp"
+#include "opto/inlinetypenode.hpp"
 #include "utilities/powerOfTwo.hpp"
 #include "utilities/globalDefinitions.hpp"
 
@@ -1627,9 +1628,13 @@ Node* VectorInsertNode::make(Node* vec, Node* new_val, int position) {
 }
 
 Node* VectorUnboxNode::Ideal(PhaseGVN* phase, bool can_reshape) {
-  Node* n = obj()->uncast();
+  Node* n = obj();
+  if (n->is_InlineType() && !n->is_VectorBox()) {
+    n = n->as_InlineType()->get_oop();
+  }
+  n = n->uncast();
   if (EnableVectorReboxing && n->Opcode() == Op_VectorBox) {
-    if (Type::cmp(bottom_type(), n->in(VectorBoxNode::Value)->bottom_type()) == 0) {
+    if (Type::cmp(bottom_type(), n->as_VectorBox()->get_vec()->bottom_type()) == 0) {
       // Handled by VectorUnboxNode::Identity()
     } else {
       VectorBoxNode* vbox = static_cast<VectorBoxNode*>(n);
@@ -1638,7 +1643,7 @@ Node* VectorUnboxNode::Ideal(PhaseGVN* phase, bool can_reshape) {
       const TypeVect* out_vt = type()->is_vect();
 
       if (in_vt->length() == out_vt->length()) {
-        Node* value = vbox->in(VectorBoxNode::Value);
+        Node* value = vbox->field_value(0);
 
         bool is_vector_mask    = vbox_klass->is_subclass_of(ciEnv::current()->vector_VectorMask_klass());
         bool is_vector_shuffle = vbox_klass->is_subclass_of(ciEnv::current()->vector_VectorShuffle_klass());
@@ -1664,10 +1669,14 @@ Node* VectorUnboxNode::Ideal(PhaseGVN* phase, bool can_reshape) {
 }
 
 Node* VectorUnboxNode::Identity(PhaseGVN* phase) {
-  Node* n = obj()->uncast();
+  Node* n = obj();
+  if (n->is_InlineType() && !n->is_VectorBox()) {
+    n = n->as_InlineType()->get_oop();
+  }
+  n = n->uncast();
   if (EnableVectorReboxing && n->Opcode() == Op_VectorBox) {
-    if (Type::cmp(bottom_type(), n->in(VectorBoxNode::Value)->bottom_type()) == 0) {
-      return n->in(VectorBoxNode::Value); // VectorUnbox (VectorBox v) ==> v
+    if (Type::cmp(bottom_type(), n->as_VectorBox()->get_vec()->bottom_type()) == 0) {
+      return n->as_VectorBox()->get_vec(); // VectorUnbox (VectorBox v) ==> v
     } else {
       // Handled by VectorUnboxNode::Ideal().
     }

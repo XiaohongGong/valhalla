@@ -675,7 +675,7 @@ Node* InlineTypeNode::Ideal(PhaseGVN* phase, bool can_reshape) {
     assert(is_allocated(phase), "should now be allocated");
     return this;
   }
-  if (oop->isa_InlineType() && !phase->type(oop)->maybe_null()) {
+  if (oop->isa_InlineType() && !oop->isa_VectorBox() && !phase->type(oop)->maybe_null()) {
     InlineTypeNode* vtptr = oop->as_InlineType();
     set_oop(vtptr->get_oop());
     set_is_init(*phase);
