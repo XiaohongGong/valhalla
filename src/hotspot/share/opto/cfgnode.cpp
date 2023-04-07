@@ -2696,8 +2696,8 @@ Node* PhiNode::merge_through_phi(Node* root_phi, PhaseIterGVN* igvn) {
   assert(cached_vbox != NULL, "sanity");
   const TypeInstPtr* btype = cached_vbox->box_type();
   const TypeVect*    vtype = cached_vbox->vec_type();
-  Node* new_vbox_phi = clone_through_phi(root_phi, btype, 1, igvn);
-  Node* new_vect_phi = clone_through_phi(root_phi, vtype, 3, igvn);
+  Node* new_vbox_phi = clone_through_phi(root_phi, btype, InlineTypeNode::Oop, igvn);
+  Node* new_vect_phi = clone_through_phi(root_phi, vtype, InlineTypeNode::Values, igvn);
   return VectorBoxNode::make_box_node(*igvn, igvn->C, new_vbox_phi, new_vect_phi, btype, vtype);
 }
 

@@ -34,6 +34,14 @@ class GraphKit;
 //------------------------------InlineTypeNode-------------------------------------
 // Node representing an inline type in C2 IR
 class InlineTypeNode : public TypeNode {
+public:
+  enum { Control,   // Control input.
+         Oop,       // Oop to heap allocated buffer (NULL if not buffered).
+         IsInit,    // Needs to be checked for NULL before using the field values.
+         Values     // Nodes corresponding to values of the inline type's fields.
+                    // Nodes are connected in increasing order of the index of the field they correspond to.
+  };
+
 protected:
   virtual uint hash() const;
   virtual bool cmp(const Node &n) const;
@@ -46,13 +54,6 @@ protected:
     init_req(Oop, oop);
     Compile::current()->add_inline_type(this);
   }
-
-  enum { Control,   // Control input.
-         Oop,       // Oop to heap allocated buffer (NULL if not buffered).
-         IsInit,    // Needs to be checked for NULL before using the field values.
-         Values     // Nodes corresponding to values of the inline type's fields.
-                    // Nodes are connected in increasing order of the index of the field they correspond to.
-  };
 
   void make_scalar_in_safepoint(PhaseIterGVN* igvn, Unique_Node_List& worklist, SafePointNode* sfpt);
 

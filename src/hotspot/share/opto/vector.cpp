@@ -323,7 +323,7 @@ void PhaseVector::expand_vbox_node(VectorBoxNode* vec_box) {
 
     ciInlineKlass* vk = vec_box->inline_klass();
     Node* klass_node = kit.makecon(TypeKlassPtr::make(vk));
-    Node* alloc_oop  = kit.new_instance(klass_node, NULL, NULL, /* deoptimize_on_exception */ true, vec_box);
+    Node* alloc_oop  = kit.new_instance(klass_node, NULL, NULL, /* deoptimize_on_exception */ true);
     vec_box->store(&kit, alloc_oop, alloc_oop, vk);
 
     // Do not let stores that initialize this buffer be reordered with a subsequent
@@ -341,60 +341,25 @@ void PhaseVector::expand_vbox_node(VectorBoxNode* vec_box) {
   C->remove_macro_node(vec_box);
 }
 
-Node* PhaseVector::get_loaded_payload(VectorUnboxNode* vec_unbox) {
-   Node* obj = vec_unbox->obj();
-   while(obj->is_InlineType()) {
-      obj = obj->as_InlineType()->field_value(0);
-   }
-   if (obj->bottom_type()->isa_vect()) {
-     return obj;
-   }
-   return NULL;
-}
-
 void PhaseVector::expand_vunbox_node_mf(VectorUnboxNode* vec_unbox) {
   if (vec_unbox->outcnt() > 0) {
     GraphKit kit;
     PhaseGVN& gvn = kit.gvn();
 
     Node* obj = vec_unbox->obj();
-    const TypeInstPtr* tinst = gvn.type(obj)->isa_instptr();
-    ciInstanceKlass* from_kls = tinst->instance_klass();
-    const TypeVect* vt = vec_unbox->bottom_type()->is_vect();
-    BasicType bt = vt->element_basic_type();
-    BasicType masktype = bt;
-    int num_elem = vt->length();
+    ciInlineKlass* kls = gvn.type(obj)->inline_klass();
 
-    int elem_size = type2aelembytes(bt);
-    Node* vec_val_load = get_loaded_payload(vec_unbox);
-    if (vec_val_load == NULL) {
-      assert(obj->isa_InlineType(), "");
-      ciSymbol* payload_sig = ciSymbol::make(VectorSupport::get_vector_payload_field_signature(bt, num_elem)->as_C_string());
-      ciSymbol* payload_name = ciSymbol::make(vmSymbols::payload_name()->as_C_string());
-      ciField* payload = from_kls->get_field_by_name(payload_name, payload_sig, false);
+    InlineTypeNode* node = InlineTypeNode::make_from_oop(&kit, obj, kls, true);
+    node = gvn.transform(node)->as_InlineType();
+    Node* vec = node->field_value(0)->as_InlineType()->field_value(0);
+    assert(Type::cmp(vec_unbox->bottom_type(), vec->bottom_type()) == 0, "type is not matched");
 
-      Node* mem = vec_unbox->mem();
-      Node* ctrl = vec_unbox->in(0);
-      Node* vec_adr = gvn.transform(kit.basic_plus_adr(obj, payload->offset()));
-
-      const TypePtr *adr_type = gvn.type(vec_adr)->isa_ptr();
-
-      int num_elem = vt->length();
-      vec_val_load = LoadVectorNode::make(0,
-                                          ctrl,
-                                          mem,
-                                          vec_adr,
-                                          adr_type,
-                                          num_elem,
-                                          bt);
-      vec_val_load = gvn.transform(vec_val_load);
-    }
-
+    const TypeVect* vt = vec->bottom_type()->is_vect();
     C->set_max_vector_size(MAX2(C->max_vector_size(), vt->length_in_bytes()));
 
     gvn.hash_delete(vec_unbox);
     vec_unbox->disconnect_inputs(C);
-    C->gvn_replace_by(vec_unbox, vec_val_load);
+    C->gvn_replace_by(vec_unbox, vec);
   }
   C->remove_macro_node(vec_unbox);
 }
@@ -407,13 +372,14 @@ void PhaseVector::expand_vunbox_node(VectorUnboxNode* vec_unbox) {
     Node* obj = vec_unbox->obj();
     const TypeInstPtr* tinst = gvn.type(obj)->isa_instptr();
     ciInstanceKlass* from_kls = tinst->instance_klass();
-    const TypeVect* vt = vec_unbox->bottom_type()->is_vect();
-    BasicType bt = vt->element_basic_type();
-    BasicType masktype = bt;
 
     if (is_vector(from_kls)) {
       return expand_vunbox_node_mf(vec_unbox);
     }
+
+    const TypeVect* vt = vec_unbox->bottom_type()->is_vect();
+    BasicType bt = vt->element_basic_type();
+    BasicType masktype = bt;
 
     if (is_vector_mask(from_kls)) {
       bt = T_BOOLEAN;

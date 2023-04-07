@@ -804,7 +804,7 @@ InlineTypeNode* InlineTypeNode::make_from_oop(GraphKit* kit, Node* oop, ciInline
   // values from a heap-allocated version and also save the oop.
   InlineTypeNode* vt = NULL;
 
-  if (oop->isa_InlineType()) {
+  if (oop->isa_InlineType() && !oop->isa_VectorBox()) {
     return oop->as_InlineType();
   } else if (gvn.type(oop)->maybe_null()) {
     // Add a null check because the oop may be null
