@@ -1629,9 +1629,9 @@ Node* VectorInsertNode::make(Node* vec, Node* new_val, int position) {
 
 Node* VectorUnboxNode::Ideal(PhaseGVN* phase, bool can_reshape) {
   Node* n = obj();
-  if (n->is_InlineType() && !n->is_VectorBox()) {
-    n = n->as_InlineType()->get_oop();
-  }
+  //if (n->is_InlineType() && !n->is_VectorBox()) {
+  //  n = n->as_InlineType()->get_oop();
+  //}
   n = n->uncast();
   if (EnableVectorReboxing && n->Opcode() == Op_VectorBox) {
     if (Type::cmp(bottom_type(), n->as_VectorBox()->get_vec()->bottom_type()) == 0) {
@@ -1670,9 +1670,9 @@ Node* VectorUnboxNode::Ideal(PhaseGVN* phase, bool can_reshape) {
 
 Node* VectorUnboxNode::Identity(PhaseGVN* phase) {
   Node* n = obj();
-  if (n->is_InlineType() && !n->is_VectorBox()) {
-    n = n->as_InlineType()->get_oop();
-  }
+  //if (n->is_InlineType() && !n->is_VectorBox()) {
+  //  n = n->as_InlineType()->get_oop();
+  //}
   n = n->uncast();
   if (EnableVectorReboxing && n->Opcode() == Op_VectorBox) {
     if (Type::cmp(bottom_type(), n->as_VectorBox()->get_vec()->bottom_type()) == 0) {

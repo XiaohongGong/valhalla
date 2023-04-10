@@ -322,9 +322,18 @@ void PhaseVector::expand_vbox_node(VectorBoxNode* vec_box) {
     GraphKit kit(jvms);
 
     ciInlineKlass* vk = vec_box->inline_klass();
+    ciInlineKlass* payload = vk->declared_nonstatic_field_at(0)->type()->as_inline_klass();
+    Node* payload_value = InlineTypeNode::make_uninitialized(kit.gvn(), payload, true);
+    payload_value->as_InlineType()->set_field_value(0, vec_box->get_vec());
+    payload_value = kit.gvn().transform(payload_value);
+
+    InlineTypeNode* vector = InlineTypeNode::make_uninitialized(kit.gvn(), vk, false);
+    vector->set_field_value(0, payload_value);
+    vector = kit.gvn().transform(vector)->as_InlineType();
+
     Node* klass_node = kit.makecon(TypeKlassPtr::make(vk));
-    Node* alloc_oop  = kit.new_instance(klass_node, NULL, NULL, /* deoptimize_on_exception */ true);
-    vec_box->store(&kit, alloc_oop, alloc_oop, vk);
+    Node* alloc_oop  = kit.new_instance(klass_node, NULL, NULL, /* deoptimize_on_exception */ true, vector);
+    vector->store(&kit, alloc_oop, alloc_oop, vk);
 
     // Do not let stores that initialize this buffer be reordered with a subsequent
     // store that would make this buffer accessible by other threads.
