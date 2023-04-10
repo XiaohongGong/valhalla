@@ -198,7 +198,7 @@ Handle VectorSupport::allocate_vector_payload_helper(InstanceKlass* ik, int num_
     instanceOop obj = InlineKlass::cast(payload_kls)->allocate_instance(THREAD);
 
     fieldDescriptor fd;
-    Klass* def = payload_kls->find_field(vmSymbols::mfield_name(), vmSymbols::type_signature(T_BYTE), false, &fd);
+    Klass* def = payload_kls->find_field(vmSymbols::mfield_name(), vmSymbols::type_signature(elem_bt), false, &fd);
     assert(fd.is_multifield_base() && fd.secondary_fields_count(fd.index()) == num_elem, "");
 
     int ffo = InlineKlass::cast(payload_kls)->first_field_offset();
@@ -341,7 +341,7 @@ Handle VectorSupport::allocate_vector_payload(InstanceKlass* ik, int num_elem, B
     Location location = payload->as_LocationValue()->location();
     if (location.type() == Location::vector) {
       // Vector payload value in an aligned adjacent tuple (8, 16, 32 or 64 bytes).
-      return allocate_vector_payload_helper(ik, num_elem, T_BYTE, fr, reg_map, location, THREAD); // safepoint
+      return allocate_vector_payload_helper(ik, num_elem, elem_bt, fr, reg_map, location, THREAD); // safepoint
     }
 #ifdef ASSERT
     // Other payload values are: 'oop' type location and scalar-replaced boxed vector representation.
