@@ -314,40 +314,84 @@ void PhaseVector::scalarize_vbox_node(VectorBoxNode* vec_box) {
 
 void PhaseVector::expand_vbox_node(VectorBoxNode* vec_box) {
   if (vec_box->outcnt() > 0) {
-    Node* vbox_alloc = vec_box->get_oop();
-    assert(vbox_alloc->is_Proj() && vbox_alloc->in(0)->isa_VectorBoxAllocate(), "");
-    VectorBoxAllocateNode* vba = vbox_alloc->in(0)->as_VectorBoxAllocate();
-
-    JVMState* jvms = clone_jvms(C, vba);
-    GraphKit kit(jvms);
-
+    Node* vbox = vec_box->get_oop();
+    Node* vect = vec_box->get_vec();
+    const TypeInstPtr* box_type = vec_box->box_type();
     ciInlineKlass* vk = vec_box->inline_klass();
-    ciInlineKlass* payload = vk->declared_nonstatic_field_at(0)->type()->as_inline_klass();
-    Node* payload_value = InlineTypeNode::make_uninitialized(kit.gvn(), payload, true);
-    payload_value->as_InlineType()->set_field_value(0, vec_box->get_vec());
-    payload_value = kit.gvn().transform(payload_value);
-
-    InlineTypeNode* vector = InlineTypeNode::make_uninitialized(kit.gvn(), vk, false);
-    vector->set_field_value(0, payload_value);
-    vector = kit.gvn().transform(vector)->as_InlineType();
-
-    Node* klass_node = kit.makecon(TypeKlassPtr::make(vk));
-    Node* alloc_oop  = kit.new_instance(klass_node, NULL, NULL, /* deoptimize_on_exception */ true, vector);
-    vector->store(&kit, alloc_oop, alloc_oop, vk);
-
-    // Do not let stores that initialize this buffer be reordered with a subsequent
-    // store that would make this buffer accessible by other threads.
-    AllocateNode* alloc = AllocateNode::Ideal_allocation(alloc_oop, &kit.gvn());
-    assert(alloc != NULL, "must have an allocation node");
-    kit.insert_mem_bar(Op_MemBarStoreStore, alloc->proj_out_or_null(AllocateNode::RawAddress));
-
-    kit.replace_call(vba, alloc_oop, true);
-    C->remove_macro_node(vba);
-
-    C->gvn_replace_by(vec_box, alloc_oop);
+    VectorSet visited;
+    Node* node = expand_vbox_node_helper(vbox, vect, box_type, vk, visited);
+    C->gvn_replace_by(vec_box, node);
     C->print_method(PHASE_EXPAND_VBOX, 3, vec_box);
   }
   C->remove_macro_node(vec_box);
+}
+
+Node* PhaseVector::expand_vbox_node_helper(Node* vbox, Node* vect, const TypeInstPtr* box_type, ciInlineKlass* vk, VectorSet& visited) {
+  if (visited.test_set(vbox->_idx)) {
+    assert(vbox->is_Phi(), "not a phi");
+    return vbox; // already visited
+  }
+
+  if (vbox->is_Phi() && vect->is_Phi()) {
+    assert(vbox->as_Phi()->region() == vect->as_Phi()->region(), "");
+    Node* new_phi = new PhiNode(vbox->as_Phi()->region(), box_type);
+    for (uint i = 1; i < vbox->req(); i++) {
+      Node* new_box = expand_vbox_node_helper(vbox->in(i), vect->in(i), box_type, vk, visited);
+      new_phi->set_req(i, new_box);
+    }
+    new_phi = C->initial_gvn()->transform(new_phi);
+    return new_phi;
+  } else if (vbox->is_Phi() && (vect->is_Vector() || vect->is_LoadVector())) {
+    // Handle the case when the allocation input to VectorBoxNode is a phi
+    // but the vector input is not, which can definitely be the case if the
+    // vector input has been value-numbered. It seems to be safe to do by
+    // construction because VectorBoxNode and VectorBoxAllocate come in a
+    // specific order as a result of expanding an intrinsic call. After that, if
+    // any of the inputs to VectorBoxNode are value-numbered they can only
+    // move up and are guaranteed to dominate.
+    Node* new_phi = new PhiNode(vbox->as_Phi()->region(), box_type);
+    for (uint i = 1; i < vbox->req(); i++) {
+      Node* new_box = expand_vbox_node_helper(vbox->in(i), vect, box_type, vk, visited);
+      new_phi->set_req(i, new_box);
+    }
+    new_phi = C->initial_gvn()->transform(new_phi);
+    return new_phi;
+  } else if (vbox->is_Proj() && vbox->in(0)->Opcode() == Op_VectorBoxAllocate) {
+    VectorBoxAllocateNode* vbox_alloc = static_cast<VectorBoxAllocateNode*>(vbox->in(0));
+    return expand_vbox_alloc_node(vbox_alloc, vect, vk);
+  } else {
+    assert(!vbox->is_Phi(), "");
+    // TODO: assert that expanded vbox is initialized with the same value (vect).
+    return vbox; // already expanded
+  }
+}
+
+Node* PhaseVector::expand_vbox_alloc_node(VectorBoxAllocateNode* vba, Node* vect, ciInlineKlass* vk) {
+  JVMState* jvms = clone_jvms(C, vba);
+  GraphKit kit(jvms);
+
+  ciInlineKlass* payload = vk->declared_nonstatic_field_at(0)->type()->as_inline_klass();
+  Node* payload_value = InlineTypeNode::make_uninitialized(kit.gvn(), payload, true);
+  payload_value->as_InlineType()->set_field_value(0, vect);
+  payload_value = kit.gvn().transform(payload_value);
+
+  InlineTypeNode* vector = InlineTypeNode::make_uninitialized(kit.gvn(), vk, false);
+  vector->set_field_value(0, payload_value);
+  vector = kit.gvn().transform(vector)->as_InlineType();
+
+  Node* klass_node = kit.makecon(TypeKlassPtr::make(vk));
+  Node* alloc_oop  = kit.new_instance(klass_node, NULL, NULL, /* deoptimize_on_exception */ true, vector);
+  vector->store(&kit, alloc_oop, alloc_oop, vk);
+
+  // Do not let stores that initialize this buffer be reordered with a subsequent
+  // store that would make this buffer accessible by other threads.
+  AllocateNode* alloc = AllocateNode::Ideal_allocation(alloc_oop, &kit.gvn());
+  assert(alloc != NULL, "must have an allocation node");
+  kit.insert_mem_bar(Op_MemBarStoreStore, alloc->proj_out_or_null(AllocateNode::RawAddress));
+
+  kit.replace_call(vba, alloc_oop, true);
+  C->remove_macro_node(vba);
+  return alloc_oop;
 }
 
 void PhaseVector::expand_vunbox_node_mf(VectorUnboxNode* vec_unbox) {
