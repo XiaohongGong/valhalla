@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,10 +25,10 @@
 #define SHARE_OPTO_VECTORNODE_HPP
 
 #include "opto/callnode.hpp"
+#include "opto/inlinetypenode.hpp"
 #include "opto/matcher.hpp"
 #include "opto/memnode.hpp"
 #include "opto/node.hpp"
-#include "opto/inlinetypenode.hpp"
 #include "opto/opcodes.hpp"
 #include "prims/vectorSupport.hpp"
 
@@ -1681,11 +1681,6 @@ class VectorBoxNode : public InlineTypeNode {
   static VectorBoxNode* make_box_node(PhaseGVN& gvn, Compile* C, Node* box, Node* val,
                                       const TypeInstPtr* box_type, const TypeVect* vt) {
     ciInlineKlass* vk = static_cast<ciInlineKlass*>(box_type->inline_klass());
-    //ciInlineKlass* payload = vk->declared_nonstatic_field_at(0)->type()->as_inline_klass();
-    //Node* payload_value = InlineTypeNode::make_uninitialized(gvn, payload, true);
-    //payload_value->as_InlineType()->set_field_value(0, val);
-    //payload_value = gvn.transform(payload_value);
-
     VectorBoxNode* box_node = new VectorBoxNode(vk, box, false, false);
     box_node->set_is_init(gvn);
     box_node->set_vec_type(vt);
@@ -1700,7 +1695,7 @@ class VectorBoxNode : public InlineTypeNode {
 
   const  TypeInstPtr* box_type() const { assert(_box_type != NULL, ""); return _box_type; };
   const  TypeVect*    vec_type() const { assert(_vec_type != NULL, ""); return _vec_type; };
-  Node*  get_vec() { return field_value(0); } //return field_value(0)->as_InlineType()->field_value(0); }
+  Node*  get_vec() { return field_value(0); }
 
   virtual int Opcode() const;
   virtual const Type* bottom_type() const { return _box_type; }

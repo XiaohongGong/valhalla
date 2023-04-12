@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,11 +24,10 @@
 #include "precompiled.hpp"
 #include "memory/allocation.inline.hpp"
 #include "opto/connode.hpp"
+#include "opto/convertnode.hpp"
 #include "opto/mulnode.hpp"
 #include "opto/subnode.hpp"
 #include "opto/vectornode.hpp"
-#include "opto/convertnode.hpp"
-#include "opto/inlinetypenode.hpp"
 #include "utilities/powerOfTwo.hpp"
 #include "utilities/globalDefinitions.hpp"
 

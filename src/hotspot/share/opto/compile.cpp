@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -2772,7 +2772,6 @@ void Compile::Optimize() {
     print_method(PHASE_ITER_GVN_AFTER_VECTOR, 2);
   }
   assert(!has_vbox_nodes(), "sanity");
-
 
   adjust_flattened_array_access_aliases(igvn);
 
