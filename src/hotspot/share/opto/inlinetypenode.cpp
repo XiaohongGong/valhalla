@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -675,7 +675,7 @@ Node* InlineTypeNode::Ideal(PhaseGVN* phase, bool can_reshape) {
     assert(is_allocated(phase), "should now be allocated");
     return this;
   }
-  if (oop->isa_InlineType() && !phase->type(oop)->maybe_null()) {
+  if (oop->isa_InlineType() && !oop->isa_VectorBox() && !phase->type(oop)->maybe_null()) {
     InlineTypeNode* vtptr = oop->as_InlineType();
     set_oop(vtptr->get_oop());
     set_is_init(*phase);
@@ -804,7 +804,7 @@ InlineTypeNode* InlineTypeNode::make_from_oop(GraphKit* kit, Node* oop, ciInline
   // values from a heap-allocated version and also save the oop.
   InlineTypeNode* vt = NULL;
 
-  if (oop->isa_InlineType()) {
+  if (oop->isa_InlineType() && !oop->isa_VectorBox()) {
     return oop->as_InlineType();
   } else if (gvn.type(oop)->maybe_null()) {
     // Add a null check because the oop may be null

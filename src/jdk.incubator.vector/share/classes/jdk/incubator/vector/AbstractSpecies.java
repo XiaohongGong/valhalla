@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -379,7 +379,7 @@ abstract class AbstractSpecies<E> extends VectorSupport.VectorSpecies<E>
             assert false : "Unsupported elemType in makeDummyVectorMF";
             break;
         }
-        return dummyVector = vectorFactory.apply(za);
+        return dummyVectorMF = vectorFactory.apply(za);
         // This is the only use of vectorFactory.
         // All other factory requests are routed
         // through the dummy vector.

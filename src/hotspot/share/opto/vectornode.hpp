@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,7 @@
 #define SHARE_OPTO_VECTORNODE_HPP
 
 #include "opto/callnode.hpp"
+#include "opto/inlinetypenode.hpp"
 #include "opto/matcher.hpp"
 #include "opto/memnode.hpp"
 #include "opto/node.hpp"
@@ -1665,24 +1666,36 @@ class VectorInsertNode : public VectorNode {
   static Node* make(Node* vec, Node* new_val, int position);
 };
 
-class VectorBoxNode : public Node {
+class VectorBoxNode : public InlineTypeNode {
  private:
-  const TypeInstPtr* const _box_type;
-  const TypeVect*    const _vec_type;
+  const TypeInstPtr* _box_type;
+  const TypeVect*    _vec_type;
+
  public:
-  enum {
-     Box   = 1,
-     Value = 2
-  };
-  VectorBoxNode(Compile* C, Node* box, Node* val,
-                const TypeInstPtr* box_type, const TypeVect* vt)
-    : Node(NULL, box, val), _box_type(box_type), _vec_type(vt) {
-    init_flags(Flag_is_macro);
-    C->add_macro_node(this);
+  void set_box_type(const TypeInstPtr* box_type) { _box_type = box_type; }
+  void set_vec_type(const TypeVect* vec_type) { _vec_type = vec_type; }
+
+  VectorBoxNode(ciInlineKlass* vk, Node* oop, bool null_free, bool is_buffered) :
+    InlineTypeNode(vk, oop, null_free, is_buffered) {}
+
+  static VectorBoxNode* make_box_node(PhaseGVN& gvn, Compile* C, Node* box, Node* val,
+                                      const TypeInstPtr* box_type, const TypeVect* vt) {
+    ciInlineKlass* vk = static_cast<ciInlineKlass*>(box_type->inline_klass());
+    VectorBoxNode* box_node = new VectorBoxNode(vk, box, false, false);
+    box_node->set_is_init(gvn);
+    box_node->set_vec_type(vt);
+    box_node->set_box_type(box_type);
+    box_node->init_flags(Flag_is_macro);
+    box_node->init_class_id(Class_VectorBox);
+    box_node->set_field_value(0, val);
+    C->add_macro_node(box_node);
+
+    return box_node;
   }
 
   const  TypeInstPtr* box_type() const { assert(_box_type != NULL, ""); return _box_type; };
   const  TypeVect*    vec_type() const { assert(_vec_type != NULL, ""); return _vec_type; };
+  Node*  get_vec() { return field_value(0); }
 
   virtual int Opcode() const;
   virtual const Type* bottom_type() const { return _box_type; }
@@ -1696,6 +1709,7 @@ class VectorBoxAllocateNode : public CallStaticJavaNode {
  public:
   VectorBoxAllocateNode(Compile* C, const TypeInstPtr* vbox_type)
     : CallStaticJavaNode(C, VectorBoxNode::vec_box_type(vbox_type), NULL, NULL) {
+    init_class_id(Class_VectorBoxAllocate);
     init_flags(Flag_is_macro);
     C->add_macro_node(this);
   }
