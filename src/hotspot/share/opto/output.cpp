@@ -819,7 +819,7 @@ void PhaseOutput::FillLocArray( int idx, MachSafePointNode* sfpt, Node *local,
         }
 
         Node* larval_node = sfpt->in(first_ind++);
-        assert(larval_node != NULL && larval_node->is_Con(), "is_larval node not found");
+        assert(larval_node != nullptr && larval_node->is_Con(), "is_larval node not found");
 
         const TypeInt* larval_type = larval_node->bottom_type()->is_int();
         is_larval = new ConstantIntValue(larval_type->get_con());

@@ -80,18 +80,11 @@ bool VectorSupport::is_vector_mask(Klass* klass) {
   return klass->is_subclass_of(vmClasses::vector_VectorMask_klass());
 }
 
-<<<<<<< HEAD
-bool VectorSupport::is_vector_shuffle(Klass* klass) {
-  return klass->is_subclass_of(vmClasses::vector_VectorShuffle_klass());
-}
-
 bool VectorSupport::skip_value_scalarization(Klass* klass) {
   return VectorSupport::is_vector(klass) ||
          VectorSupport::is_vector_payload_mf(klass);
 }
 
-=======
->>>>>>> 94636f4c8282474e58ea8229711102e104966257
 BasicType VectorSupport::klass2bt(InstanceKlass* ik) {
   assert(ik->is_subclass_of(vmClasses::vector_VectorPayload_klass()), "%s not a VectorPayload", ik->name()->as_C_string());
   fieldDescriptor fd; // find_field initializes fd if found
@@ -174,9 +167,6 @@ Symbol* VectorSupport::get_vector_payload_field_signature(BasicType elem_bt, int
       } break;
     case T_BYTE:
       switch(num_elem) {
-        case  1: return vmSymbols::vector_VectorPayloadMF8B_signature();
-        case  2: return vmSymbols::vector_VectorPayloadMF16B_signature();
-        case  4: return vmSymbols::vector_VectorPayloadMF32B_signature();
         case  8: return vmSymbols::vector_VectorPayloadMF64B_signature();
         case 16: return vmSymbols::vector_VectorPayloadMF128B_signature();
         case 32: return vmSymbols::vector_VectorPayloadMF256B_signature();
@@ -244,9 +234,6 @@ InstanceKlass* VectorSupport::get_vector_payload_klass(BasicType elem_bt, int nu
       } break;
     case T_BYTE:
       switch(num_elem) {
-        case  1: return vmClasses::klass_at(VM_CLASS_ID(vector_VectorPayloadMF8B_klass));
-        case  2: return vmClasses::klass_at(VM_CLASS_ID(vector_VectorPayloadMF16B_klass));
-        case  4: return vmClasses::klass_at(VM_CLASS_ID(vector_VectorPayloadMF32B_klass));
         case  8: return vmClasses::klass_at(VM_CLASS_ID(vector_VectorPayloadMF64B_klass));
         case 16: return vmClasses::klass_at(VM_CLASS_ID(vector_VectorPayloadMF128B_klass));
         case 32: return vmClasses::klass_at(VM_CLASS_ID(vector_VectorPayloadMF256B_klass));

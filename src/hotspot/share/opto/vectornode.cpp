@@ -1768,40 +1768,6 @@ Node* VectorInsertNode::make(Node* vec, Node* new_val, int position) {
   return new VectorInsertNode(vec, new_val, pos, vec->bottom_type()->is_vect());
 }
 
-<<<<<<< HEAD
-=======
-Node* VectorUnboxNode::Ideal(PhaseGVN* phase, bool can_reshape) {
-  Node* n = obj()->uncast();
-  if (EnableVectorReboxing && n->Opcode() == Op_VectorBox) {
-    if (Type::cmp(bottom_type(), n->in(VectorBoxNode::Value)->bottom_type()) == 0) {
-      // Handled by VectorUnboxNode::Identity()
-    } else {
-      VectorBoxNode* vbox = static_cast<VectorBoxNode*>(n);
-      ciKlass* vbox_klass = vbox->box_type()->instance_klass();
-      const TypeVect* in_vt = vbox->vec_type();
-      const TypeVect* out_vt = type()->is_vect();
-
-      if (in_vt->length() == out_vt->length()) {
-        Node* value = vbox->in(VectorBoxNode::Value);
-
-        bool is_vector_mask = vbox_klass->is_subclass_of(ciEnv::current()->vector_VectorMask_klass());
-        if (is_vector_mask) {
-          // VectorUnbox (VectorBox vmask) ==> VectorMaskCast vmask
-          const TypeVect* vmask_type = TypeVect::makemask(out_vt->element_basic_type(), out_vt->length());
-          return new VectorMaskCastNode(value, vmask_type);
-        } else {
-          // Vector type mismatch is only supported for masks, but sometimes it happens in pathological cases.
-        }
-      } else {
-        // Vector length mismatch.
-        // Sometimes happen in pathological cases (e.g., when unboxing happens in effectively dead code).
-      }
-    }
-  }
-  return nullptr;
-}
-
->>>>>>> 94636f4c8282474e58ea8229711102e104966257
 Node* VectorUnboxNode::Identity(PhaseGVN* phase) {
   Node* n = obj();
   assert(n->is_InlineType(), "");

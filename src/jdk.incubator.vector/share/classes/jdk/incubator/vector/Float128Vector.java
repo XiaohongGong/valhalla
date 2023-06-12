@@ -143,15 +143,7 @@ value class Float128Vector extends FloatVector {
 
     @Override
     @ForceInline
-<<<<<<< HEAD
-    Float128Shuffle shuffleFromBytes(VectorPayloadMF reorder) { return new Float128Shuffle(reorder); }
-
-    @Override
-    @ForceInline
-    Float128Shuffle shuffleFromArray(int[] indexes, int i) { return new Float128Shuffle(indexes, i); }
-=======
     Float128Shuffle shuffleFromArray(int[] indices, int i) { return new Float128Shuffle(indices, i); }
->>>>>>> 94636f4c8282474e58ea8229711102e104966257
 
     @Override
     @ForceInline
@@ -709,36 +701,12 @@ value class Float128Vector extends FloatVector {
         static final int VLENGTH = VSPECIES.laneCount();    // used by the JVM
         static final Class<Integer> ETYPE = int.class; // used by the JVM
 
-<<<<<<< HEAD
-        private final VectorPayloadMF32B payload;
+        private final VectorPayloadMF128I payload;
 
-        Float128Shuffle(VectorPayloadMF reorder) {
-            this.payload = (VectorPayloadMF32B) reorder;
-            assert(VLENGTH == reorder.length());
-            assert(indexesInRange(reorder));
-        }
-
-        public Float128Shuffle(int[] reorder) {
-            this(reorder, 0);
-        }
-
-        public Float128Shuffle(int[] reorder, int i) {
-            this(prepare(VLENGTH, reorder, i));
-        }
-
-        public Float128Shuffle(IntUnaryOperator fn) {
-            this(prepare(VLENGTH, fn));
-        }
-
-        @ForceInline
-        @Override
-        protected final VectorPayloadMF reorder() {
-            return payload;
-=======
-        Float128Shuffle(int[] indices) {
-            super(indices);
-            assert(VLENGTH == indices.length);
-            assert(indicesInRange(indices));
+        Float128Shuffle(VectorPayloadMF payload) {
+            this.payload = (VectorPayloadMF128I) payload;
+            assert(VLENGTH == payload.length());
+            assert(indicesInRange(payload));
         }
 
         Float128Shuffle(int[] indices, int i) {
@@ -749,9 +717,10 @@ value class Float128Vector extends FloatVector {
             this(prepare(fn));
         }
 
-        int[] indices() {
-            return (int[])getPayload();
->>>>>>> 94636f4c8282474e58ea8229711102e104966257
+        @ForceInline
+        @Override
+        protected final VectorPayloadMF indices() {
+            return payload;
         }
 
         @Override
@@ -777,7 +746,7 @@ value class Float128Vector extends FloatVector {
         @Override
         @ForceInline
         IntVector toBitsVector0() {
-            return Int128Vector.VSPECIES.dummyVector().vectorFactory(indices());
+            return Int128Vector.VSPECIES.dummyVectorMF().vectorFactory(indices());
         }
 
         @Override
@@ -787,63 +756,55 @@ value class Float128Vector extends FloatVector {
         }
 
         @Override
-<<<<<<< HEAD
-        public Float128Shuffle rearrange(VectorShuffle<Float> shuffle) {
-            Float128Shuffle s = (Float128Shuffle) shuffle;
-            VectorPayloadMF reorder1 = reorder();
-            VectorPayloadMF reorder2 = s.reorder();
-            VectorPayloadMF r = VectorPayloadMF.newInstanceFactory(byte.class, VLENGTH);
-            r = Unsafe.getUnsafe().makePrivateBuffer(r);
-            long offset = r.multiFieldOffset();
-            for (int i = 0; i < VLENGTH; i++) {
-                int ssi = Unsafe.getUnsafe().getByte(reorder2, offset + i * Byte.BYTES);
-                int si = Unsafe.getUnsafe().getByte(reorder1, offset + ssi * Byte.BYTES);
-                Unsafe.getUnsafe().putByte(r, offset + i * Byte.BYTES, (byte) si);
-            }
-            r = Unsafe.getUnsafe().finishPrivateBuffer(r);
-            return new Float128Shuffle(r);
-=======
         @ForceInline
         public void intoArray(int[] a, int offset) {
             toBitsVector().intoArray(a, offset);
         }
 
-        private static int[] prepare(int[] indices, int offset) {
-            int[] a = new int[VLENGTH];
+        private static VectorPayloadMF prepare(int[] indices, int offset) {
+            VectorPayloadMF payload = VectorPayloadMF.newInstanceFactory(int.class, VLENGTH);
+            payload = Unsafe.getUnsafe().makePrivateBuffer(payload);
+            long mfOffset = payload.multiFieldOffset();
             for (int i = 0; i < VLENGTH; i++) {
                 int si = indices[offset + i];
                 si = partiallyWrapIndex(si, VLENGTH);
-                a[i] = (int)si;
+                Unsafe.getUnsafe().putInt(payload, mfOffset + i * Integer.BYTES, (int) si);
             }
-            return a;
+            payload = Unsafe.getUnsafe().finishPrivateBuffer(payload);
+            return payload;
         }
 
-        private static int[] prepare(IntUnaryOperator f) {
-            int[] a = new int[VLENGTH];
+        private static VectorPayloadMF prepare(IntUnaryOperator f) {
+            VectorPayloadMF payload = VectorPayloadMF.newInstanceFactory(int.class, VLENGTH);
+            payload = Unsafe.getUnsafe().makePrivateBuffer(payload);
+            long offset = payload.multiFieldOffset();
             for (int i = 0; i < VLENGTH; i++) {
                 int si = f.applyAsInt(i);
                 si = partiallyWrapIndex(si, VLENGTH);
-                a[i] = (int)si;
+                Unsafe.getUnsafe().putInt(payload, offset + i * Integer.BYTES, (int) si);
             }
-            return a;
+            payload = Unsafe.getUnsafe().finishPrivateBuffer(payload);
+            return payload;
         }
 
-        private static boolean indicesInRange(int[] indices) {
-            int length = indices.length;
-            for (int si : indices) {
-                if (si >= (int)length || si < (int)(-length)) {
+
+        private static boolean indicesInRange(VectorPayloadMF indices) {
+            int length = indices.length();
+            long offset = indices.multiFieldOffset();
+            for (int i = 0; i < length; i++) {
+                int si = Unsafe.getUnsafe().getInt(indices, offset + i * Integer.BYTES);
+                if (si >= length || si < -length) {
                     boolean assertsEnabled = false;
                     assert(assertsEnabled = true);
                     if (assertsEnabled) {
                         String msg = ("index "+si+"out of range ["+length+"] in "+
-                                  java.util.Arrays.toString(indices));
+                                indices.toString());
                         throw new AssertionError(msg);
                     }
                     return false;
                 }
             }
             return true;
->>>>>>> 94636f4c8282474e58ea8229711102e104966257
         }
     }
 

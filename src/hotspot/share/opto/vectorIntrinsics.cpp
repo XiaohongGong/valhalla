@@ -31,14 +31,6 @@
 #include "prims/vectorSupport.hpp"
 #include "runtime/stubRoutines.hpp"
 
-static bool is_vector_mask(ciKlass* klass) {
-  return klass->is_subclass_of(ciEnv::current()->vector_VectorMask_klass());
-}
-
-static bool is_vector_shuffle(ciKlass* klass) {
-  return klass->is_subclass_of(ciEnv::current()->vector_VectorShuffle_klass());
-}
-
 #ifdef ASSERT
 static bool is_vector(ciKlass* klass) {
   return klass->is_subclass_of(ciEnv::current()->vector_VectorPayload_klass());
@@ -67,13 +59,10 @@ static bool check_vbox(const TypeInstPtr* vbox_type) {
 }
 #endif
 
-<<<<<<< HEAD
-=======
 static bool is_vector_mask(ciKlass* klass) {
   return klass->is_subclass_of(ciEnv::current()->vector_VectorMask_klass());
 }
 
->>>>>>> 94636f4c8282474e58ea8229711102e104966257
 bool LibraryCallKit::arch_supports_vector_rotate(int opc, int num_elem, BasicType elem_bt,
                                                  VectorMaskUseType mask_use_type, bool has_scalar_args) {
   bool is_supported = true;
@@ -163,10 +152,6 @@ Node* GraphKit::box_vector(Node* vector, const TypeInstPtr* vbox_type, BasicType
 
   assert(check_vbox(vbox_type), "");
 
-  if (is_vector_shuffle(vbox_type->instance_klass())) {
-    assert(elem_bt == T_BYTE, "must be consistent with shuffle representation");
-  }
-
   // VectorMask format conversion
   if (is_vector_mask(vbox_type->instance_klass()) &&
       (vector->bottom_type()->isa_vectmask() || elem_bt != T_BOOLEAN)) {
@@ -191,7 +176,6 @@ Node* GraphKit::unbox_vector(Node* v, const TypeInstPtr* vbox_type, BasicType el
   }
 
   assert(check_vbox(vbox_type), "");
-<<<<<<< HEAD
   BasicType unbox_bt = elem_bt;
   if (is_vector_mask(vbox_type->instance_klass())) {
     unbox_bt = T_BOOLEAN;
@@ -201,10 +185,6 @@ Node* GraphKit::unbox_vector(Node* v, const TypeInstPtr* vbox_type, BasicType el
   if (is_vector_mask(vbox_type->instance_klass())) {
     unbox = gvn().transform(new VectorLoadMaskNode(unbox, TypeVect::makemask(elem_bt, num_elem)));
   }
-=======
-  const TypeVect* vt = TypeVect::make(elem_bt, num_elem, is_vector_mask(vbox_type->instance_klass()));
-  Node* unbox = gvn().transform(new VectorUnboxNode(C, vt, v, merged_memory()));
->>>>>>> 94636f4c8282474e58ea8229711102e104966257
   return unbox;
 }
 
@@ -653,11 +633,7 @@ bool LibraryCallKit::inline_vector_mask_operation() {
   ciKlass* mbox_klass = mask_klass->const_oop()->as_instance()->java_lang_Class_klass();
   const TypeInstPtr* mask_box_type = TypeInstPtr::make_exact(TypePtr::NotNull, mbox_klass);
   Node* mask_vec = unbox_vector(mask, mask_box_type, elem_bt, num_elem);
-<<<<<<< HEAD
-  if (mask_vec == NULL) {
-=======
   if (mask_vec == nullptr) {
->>>>>>> 94636f4c8282474e58ea8229711102e104966257
     if (C->print_intrinsics()) {
         tty->print_cr("  ** unbox failed mask=%s",
                       NodeClassNames[argument(4)->Opcode()]);
@@ -680,75 +656,6 @@ bool LibraryCallKit::inline_vector_mask_operation() {
 }
 
 // public static
-<<<<<<< HEAD
-// <V,
-//  Sh extends VectorShuffle<E>,
-//  E>
-// V shuffleToVector(Class<? extends Vector<E>> vclass, Class<E> elementType,
-//                   Class<? extends Sh> shuffleClass, Sh s, int length,
-//                   ShuffleToVectorOperation<V, Sh, E> defaultImpl)
-bool LibraryCallKit::inline_vector_shuffle_to_vector() {
-  const TypeInstPtr* vector_klass  = gvn().type(argument(0))->isa_instptr();
-  const TypeInstPtr* elem_klass    = gvn().type(argument(1))->isa_instptr();
-  const TypeInstPtr* shuffle_klass = gvn().type(argument(2))->isa_instptr();
-  Node*              shuffle       = argument(3);
-  const TypeInt*     vlen          = gvn().type(argument(4))->isa_int();
-
-  if (vector_klass == NULL || elem_klass == NULL || shuffle_klass == NULL || shuffle->is_top() || vlen == NULL) {
-    return false; // dead code
-  }
-  if (!vlen->is_con() || vector_klass->const_oop() == NULL || shuffle_klass->const_oop() == NULL) {
-    return false; // not enough info for intrinsification
-  }
-  if (!is_klass_initialized(shuffle_klass) || !is_klass_initialized(vector_klass) ) {
-    if (C->print_intrinsics()) {
-      tty->print_cr("  ** klass argument not initialized");
-    }
-    return false;
-  }
-
-  int num_elem = vlen->get_con();
-  ciType* elem_type = elem_klass->const_oop()->as_instance()->java_mirror_type();
-  BasicType elem_bt = elem_type->basic_type();
-
-  if (num_elem < 4) {
-    return false;
-  }
-
-  int cast_vopc = VectorCastNode::opcode(-1, T_BYTE); // from shuffle of type T_BYTE
-  // Make sure that cast is implemented to particular type/size combination.
-  if (!arch_supports_vector(cast_vopc, num_elem, elem_bt, VecMaskNotUsed)) {
-    if (C->print_intrinsics()) {
-      tty->print_cr("  ** not supported: arity=1 op=cast#%d/3 vlen2=%d etype2=%s",
-        cast_vopc, num_elem, type2name(elem_bt));
-    }
-    return false;
-  }
-
-  ciKlass* sbox_klass = shuffle_klass->const_oop()->as_instance()->java_lang_Class_klass();
-  const TypeInstPtr* shuffle_box_type = TypeInstPtr::make_exact(TypePtr::NotNull, sbox_klass);
-
-  Node* shuffle_vec = unbox_vector(shuffle, shuffle_box_type, T_BYTE, num_elem);
-  if (shuffle_vec == NULL) {
-    return false;
-  }
-
-  // cast byte to target element type
-  shuffle_vec = gvn().transform(VectorCastNode::make(cast_vopc, shuffle_vec, elem_bt, num_elem));
-
-  ciKlass* vbox_klass = vector_klass->const_oop()->as_instance()->java_lang_Class_klass();
-  const TypeInstPtr* vec_box_type = TypeInstPtr::make_exact(TypePtr::NotNull, vbox_klass);
-
-  // Box vector
-  Node* res = box_vector(shuffle_vec, vec_box_type, elem_bt, num_elem);
-  set_result(res);
-  C->set_max_vector_size(MAX2(C->max_vector_size(), (uint)(num_elem * type2aelembytes(elem_bt))));
-  return true;
-}
-
-// public static
-=======
->>>>>>> 94636f4c8282474e58ea8229711102e104966257
 // <M,
 //  S extends VectorSpecies<E>,
 //  E>
@@ -2004,8 +1911,6 @@ bool LibraryCallKit::inline_vector_rearrange() {
   }
 
   BasicType elem_bt = elem_type->basic_type();
-<<<<<<< HEAD
-=======
   BasicType shuffle_bt = elem_bt;
   if (shuffle_bt == T_FLOAT) {
     shuffle_bt = T_INT;
@@ -2013,7 +1918,6 @@ bool LibraryCallKit::inline_vector_rearrange() {
     shuffle_bt = T_LONG;
   }
 
->>>>>>> 94636f4c8282474e58ea8229711102e104966257
   int num_elem = vlen->get_con();
   bool need_load_shuffle = Matcher::vector_needs_load_shuffle(shuffle_bt, num_elem);
 
@@ -2056,16 +1960,8 @@ bool LibraryCallKit::inline_vector_rearrange() {
   const TypeInstPtr* shbox_type = TypeInstPtr::make_exact(TypePtr::NotNull, shbox_klass);
 
   Node* v1 = unbox_vector(argument(5), vbox_type, elem_bt, num_elem);
-<<<<<<< HEAD
-  Node* shuffle = unbox_vector(argument(6), shbox_type, T_BYTE, num_elem);
-  if (v1 == NULL || shuffle == NULL) {
-=======
   Node* shuffle = unbox_vector(argument(6), shbox_type, shuffle_bt, num_elem);
-  const TypeVect* vt = TypeVect::make(elem_bt, num_elem);
-  const TypeVect* st = TypeVect::make(shuffle_bt, num_elem);
-
   if (v1 == nullptr || shuffle == nullptr) {
->>>>>>> 94636f4c8282474e58ea8229711102e104966257
     return false; // operand unboxing failed
   }
 
@@ -2083,14 +1979,11 @@ bool LibraryCallKit::inline_vector_rearrange() {
     }
   }
 
-<<<<<<< HEAD
-  shuffle = gvn().transform(new VectorLoadShuffleNode(shuffle, TypeVect::make(elem_bt, num_elem)));
-=======
   if (need_load_shuffle) {
+    const TypeVect* st = TypeVect::make(shuffle_bt, num_elem);
     shuffle = gvn().transform(new VectorLoadShuffleNode(shuffle, st));
   }
 
->>>>>>> 94636f4c8282474e58ea8229711102e104966257
   Node* rearrange = new VectorRearrangeNode(v1, shuffle);
   if (is_masked_op) {
     if (use_predicate) {

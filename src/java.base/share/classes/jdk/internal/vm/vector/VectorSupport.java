@@ -180,9 +180,6 @@ public class VectorSupport {
                 }
             } else if (elemType == byte.class) {
                 switch(length) {
-                    case  1: return new VectorPayloadMF8B();
-                    case  2: return new VectorPayloadMF16B();
-                    case  4: return new VectorPayloadMF32B();
                     case  8: return new VectorPayloadMF64B();
                     case 16: return new VectorPayloadMF128B();
                     case 32: return new VectorPayloadMF256B();
@@ -390,33 +387,6 @@ public class VectorSupport {
         @MultiField(value = 64)
         boolean mfield = false;
         static long MFOFFSET = multiFieldOffset(VectorPayloadMF512Z.class);
-
-        @Override
-        public long multiFieldOffset() { return MFOFFSET; }
-    }
-
-    public primitive static class VectorPayloadMF8B extends VectorPayloadMF {
-        @MultiField(value = 1)
-        byte mfield = 0;
-        static long MFOFFSET = multiFieldOffset(VectorPayloadMF8B.class);
-
-        @Override
-        public long multiFieldOffset() { return MFOFFSET; }
-    }
-
-    public primitive static class VectorPayloadMF16B extends VectorPayloadMF {
-        @MultiField(value = 2)
-        byte mfield = 0;
-        static long MFOFFSET = multiFieldOffset(VectorPayloadMF16B.class);
-
-        @Override
-        public long multiFieldOffset() { return MFOFFSET; }
-    }
-
-    public primitive static class VectorPayloadMF32B extends VectorPayloadMF {
-        @MultiField(value = 4)
-        byte mfield = 0;
-        static long MFOFFSET = multiFieldOffset(VectorPayloadMF32B.class);
 
         @Override
         public long multiFieldOffset() { return MFOFFSET; }

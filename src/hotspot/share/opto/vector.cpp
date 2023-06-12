@@ -32,13 +32,6 @@
 #include "opto/vector.hpp"
 #include "utilities/macros.hpp"
 
-<<<<<<< HEAD
-=======
-static bool is_vector_mask(ciKlass* klass) {
-  return klass->is_subclass_of(ciEnv::current()->vector_VectorMask_klass());
-}
-
->>>>>>> 94636f4c8282474e58ea8229711102e104966257
 void PhaseVector::optimize_vector_boxes() {
   Compile::TracePhase tp("vector_elimination", &timers[_t_vector_elimination]);
 
@@ -235,87 +228,14 @@ void PhaseVector::scalarize_vbox_node(VectorBoxNode* vec_box) {
       C->record_for_igvn(call);
     }
   }
-<<<<<<< HEAD
-=======
-
-  // Process debug uses at safepoints
-  Unique_Node_List safepoints(C->comp_arena());
-
-  Unique_Node_List worklist(C->comp_arena());
-  worklist.push(vec_box);
-  while (worklist.size() > 0) {
-    Node* n = worklist.pop();
-    for (DUIterator_Fast imax, i = n->fast_outs(imax); i < imax; i++) {
-      Node* use = n->fast_out(i);
-      if (use->is_SafePoint()) {
-        SafePointNode* sfpt = use->as_SafePoint();
-        if (!sfpt->is_Call() || !sfpt->as_Call()->has_non_debug_use(n)) {
-          safepoints.push(sfpt);
-        }
-      } else if (use->is_ConstraintCast()) {
-        worklist.push(use); // reversed version of Node::uncast()
-      }
-    }
-  }
-
-  ciInstanceKlass* iklass = vec_box->box_type()->instance_klass();
-  int n_fields = iklass->nof_nonstatic_fields();
-  assert(n_fields == 1, "sanity");
-
-  // If a mask is feeding into safepoint[s], then its value should be
-  // packed into a boolean/byte vector first, this will simplify the
-  // re-materialization logic for both predicated and non-predicated
-  // targets.
-  bool is_mask = is_vector_mask(iklass);
-  if (is_mask && vec_value->Opcode() != Op_VectorStoreMask) {
-    const TypeVect* vt = vec_value->bottom_type()->is_vect();
-    BasicType bt = vt->element_basic_type();
-    vec_value = gvn.transform(VectorStoreMaskNode::make(gvn, vec_value, bt, vt->length()));
-  }
-
-  while (safepoints.size() > 0) {
-    SafePointNode* sfpt = safepoints.pop()->as_SafePoint();
-
-    uint first_ind = (sfpt->req() - sfpt->jvms()->scloff());
-    Node* sobj = new SafePointScalarObjectNode(vec_box->box_type(),
-#ifdef ASSERT
-                                               vec_box,
-#endif // ASSERT
-                                               first_ind, n_fields);
-    sobj->init_req(0, C->root());
-    sfpt->add_req(vec_value);
-
-    sobj = gvn.transform(sobj);
-
-    JVMState *jvms = sfpt->jvms();
-
-    jvms->set_endoff(sfpt->req());
-    // Now make a pass over the debug information replacing any references
-    // to the allocated object with vector value.
-    for (uint i = jvms->debug_start(); i < jvms->debug_end(); i++) {
-      Node* debug = sfpt->in(i);
-      if (debug != nullptr && debug->uncast(/*keep_deps*/false) == vec_box) {
-        sfpt->set_req(i, sobj);
-      }
-    }
-    C->record_for_igvn(sfpt);
-  }
->>>>>>> 94636f4c8282474e58ea8229711102e104966257
 }
 
 void PhaseVector::expand_vbox_node(VectorBoxNode* vec_box) {
   if (vec_box->outcnt() > 0) {
-<<<<<<< HEAD
+    VectorSet visited;
     Node* vbox = vec_box->get_oop();
     Node* vect = vec_box->get_vec();
-    Node* result = expand_vbox_node_helper(vbox, vect, vec_box->box_type(), vec_box->vec_type());
-=======
-    VectorSet visited;
-    Node* vbox = vec_box->in(VectorBoxNode::Box);
-    Node* vect = vec_box->in(VectorBoxNode::Value);
-    Node* result = expand_vbox_node_helper(vbox, vect, vec_box->box_type(),
-                                           vec_box->vec_type(), visited);
->>>>>>> 94636f4c8282474e58ea8229711102e104966257
+    Node* result = expand_vbox_node_helper(vbox, vect, vec_box->box_type(), vec_box->vec_type(), visited);
     C->gvn_replace_by(vec_box, result);
     C->print_method(PHASE_EXPAND_VBOX, 3, vec_box);
   }
@@ -415,34 +335,7 @@ Node* PhaseVector::expand_vbox_alloc_node(VectorBoxAllocateNode* vbox_alloc,
 
   C->set_max_vector_size(MAX2(C->max_vector_size(), vect_type->length_in_bytes()));
 
-<<<<<<< HEAD
   kit.replace_call(vbox_alloc, alloc_oop, true);
-=======
-  // Generate the allocate for the Vector object.
-  const TypeKlassPtr* klass_type = box_type->as_klass_type();
-  Node* klass_node = kit.makecon(klass_type);
-  Node* vec_obj = kit.new_instance(klass_node);
-
-  // Store the allocated array into object.
-  ciField* field = ciEnv::current()->vector_VectorPayload_klass()->get_field_by_name(ciSymbols::payload_name(),
-                                                                                     ciSymbols::object_signature(),
-                                                                                     false);
-  assert(field != nullptr, "");
-  Node* vec_field = kit.basic_plus_adr(vec_obj, field->offset_in_bytes());
-  const TypePtr* vec_adr_type = vec_field->bottom_type()->is_ptr();
-
-  // The store should be captured by InitializeNode and turned into initialized store later.
-  Node* field_store = gvn.transform(kit.access_store_at(vec_obj,
-                                                        vec_field,
-                                                        vec_adr_type,
-                                                        arr,
-                                                        TypeOopPtr::make_from_klass(field->type()->as_klass()),
-                                                        T_OBJECT,
-                                                        IN_HEAP));
-  kit.set_memory(field_store, vec_adr_type);
-
-  kit.replace_call(vbox_alloc, vec_obj, true);
->>>>>>> 94636f4c8282474e58ea8229711102e104966257
   C->remove_macro_node(vbox_alloc);
   return alloc_oop;
 }
@@ -452,7 +345,6 @@ void PhaseVector::expand_vunbox_node(VectorUnboxNode* vec_unbox) {
     GraphKit kit;
     PhaseGVN& gvn = kit.gvn();
 
-<<<<<<< HEAD
     Node* node = vec_unbox->obj();
     while(node->is_InlineType()) {
       node = node->as_InlineType()->field_value(0);
@@ -460,62 +352,6 @@ void PhaseVector::expand_vunbox_node(VectorUnboxNode* vec_unbox) {
 
     assert(node->bottom_type()->isa_vect() != NULL, "not a vector");
     assert(Type::cmp(vec_unbox->bottom_type(), node->bottom_type()) == 0, "type is not matched");
-=======
-    Node* obj = vec_unbox->obj();
-    const TypeInstPtr* tinst = gvn.type(obj)->isa_instptr();
-    ciInstanceKlass* from_kls = tinst->instance_klass();
-    const TypeVect* vt = vec_unbox->bottom_type()->is_vect();
-    BasicType bt = vt->element_basic_type();
-    BasicType masktype = bt;
-
-    if (is_vector_mask(from_kls)) {
-      bt = T_BOOLEAN;
-    }
-
-    ciField* field = ciEnv::current()->vector_VectorPayload_klass()->get_field_by_name(ciSymbols::payload_name(),
-                                                                                       ciSymbols::object_signature(),
-                                                                                       false);
-    assert(field != nullptr, "");
-    int offset = field->offset_in_bytes();
-    Node* vec_adr = kit.basic_plus_adr(obj, offset);
-
-    Node* mem = vec_unbox->mem();
-    Node* ctrl = vec_unbox->in(0);
-    Node* vec_field_ld;
-    {
-      DecoratorSet decorators = MO_UNORDERED | IN_HEAP;
-      C2AccessValuePtr addr(vec_adr, vec_adr->bottom_type()->is_ptr());
-      MergeMemNode* local_mem = MergeMemNode::make(mem);
-      gvn.record_for_igvn(local_mem);
-      BarrierSetC2* bs = BarrierSet::barrier_set()->barrier_set_c2();
-      C2OptAccess access(gvn, ctrl, local_mem, decorators, T_OBJECT, obj, addr);
-      const Type* type = TypeOopPtr::make_from_klass(field->type()->as_klass());
-      vec_field_ld = bs->load_at(access, type);
-    }
-
-    // For proper aliasing, attach concrete payload type.
-    ciKlass* payload_klass = ciTypeArrayKlass::make(bt);
-    const Type* payload_type = TypeAryPtr::make_from_klass(payload_klass)->cast_to_ptr_type(TypePtr::NotNull);
-    vec_field_ld = gvn.transform(new CastPPNode(vec_field_ld, payload_type));
-
-    Node* adr = kit.array_element_address(vec_field_ld, gvn.intcon(0), bt);
-    const TypePtr* adr_type = adr->bottom_type()->is_ptr();
-    int num_elem = vt->length();
-    Node* vec_val_load = LoadVectorNode::make(0,
-                                              ctrl,
-                                              mem,
-                                              adr,
-                                              adr_type,
-                                              num_elem,
-                                              bt);
-    vec_val_load = gvn.transform(vec_val_load);
-
-    C->set_max_vector_size(MAX2(C->max_vector_size(), vt->length_in_bytes()));
-
-    if (is_vector_mask(from_kls)) {
-      vec_val_load = gvn.transform(new VectorLoadMaskNode(vec_val_load, TypeVect::makemask(masktype, num_elem)));
-    }
->>>>>>> 94636f4c8282474e58ea8229711102e104966257
 
     C->set_max_vector_size(MAX2(C->max_vector_size(), vec_unbox->bottom_type()->is_vect()->length_in_bytes()));
     gvn.hash_delete(vec_unbox);

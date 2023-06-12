@@ -25,12 +25,9 @@
 #define SHARE_OPTO_VECTORNODE_HPP
 
 #include "opto/callnode.hpp"
-<<<<<<< HEAD
-#include "opto/inlinetypenode.hpp"
-=======
 #include "opto/cfgnode.hpp"
+#include "opto/inlinetypenode.hpp"
 #include "opto/loopnode.hpp"
->>>>>>> 94636f4c8282474e58ea8229711102e104966257
 #include "opto/matcher.hpp"
 #include "opto/memnode.hpp"
 #include "opto/node.hpp"
@@ -1695,7 +1692,6 @@ class VectorInsertNode : public VectorNode {
 
 class VectorBoxNode : public InlineTypeNode {
  private:
-<<<<<<< HEAD
   const TypeInstPtr* _box_type;
   const TypeVect*    _vec_type;
 
@@ -1724,20 +1720,6 @@ class VectorBoxNode : public InlineTypeNode {
     box_node->set_field_value(0, payload_value);
     box_node->set_is_init(gvn);
     return box_node;
-=======
-  const TypeInstPtr* const _box_type;
-  const TypeVect*    const _vec_type;
- public:
-  enum {
-     Box   = 1,
-     Value = 2
-  };
-  VectorBoxNode(Compile* C, Node* box, Node* val,
-                const TypeInstPtr* box_type, const TypeVect* vt)
-    : Node(nullptr, box, val), _box_type(box_type), _vec_type(vt) {
-    init_flags(Flag_is_macro);
-    C->add_macro_node(this);
->>>>>>> 94636f4c8282474e58ea8229711102e104966257
   }
 
   const  TypeInstPtr* box_type() const { assert(_box_type != nullptr, ""); return _box_type; };
@@ -1785,10 +1767,6 @@ class VectorUnboxNode : public VectorNode {
   Node* obj() const { return in(2); }
   Node* mem() const { return in(1); }
   virtual Node* Identity(PhaseGVN* phase);
-<<<<<<< HEAD
-=======
-  Node* Ideal(PhaseGVN* phase, bool can_reshape);
->>>>>>> 94636f4c8282474e58ea8229711102e104966257
 };
 
 class RotateRightVNode : public VectorNode {

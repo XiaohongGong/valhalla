@@ -215,10 +215,6 @@ abstract class AbstractVector<E> extends Vector<E> {
 
     abstract VectorShuffle<E> iotaShuffle();
 
-<<<<<<< HEAD
-    /*do not alias this byte array*/
-    abstract AbstractShuffle<E> shuffleFromBytes(VectorPayloadMF reorder);
-=======
     @ForceInline
     @SuppressWarnings({"rawtypes", "unchecked"})
     final VectorShuffle<E> iotaShuffle(int start, int step, boolean wrap) {
@@ -244,7 +240,6 @@ abstract class AbstractVector<E> extends Vector<E> {
         }
         return ((AbstractVector) wrapped).toShuffle(vspecies());
     }
->>>>>>> 94636f4c8282474e58ea8229711102e104966257
 
     abstract AbstractShuffle<E> shuffleFromArray(int[] indexes, int i);
 
