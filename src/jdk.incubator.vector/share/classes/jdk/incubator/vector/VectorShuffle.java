@@ -133,10 +133,16 @@ import java.util.function.IntUnaryOperator;
  */
 @SuppressWarnings("exports")
 public abstract class VectorShuffle<E> extends jdk.internal.vm.vector.VectorSupport.VectorShuffle<E> {
+<<<<<<< HEAD
     /**
      * Default Constructor for abstract VectorShuffle.
      */
     public VectorShuffle() {}
+=======
+    VectorShuffle(Object indices) {
+        super(indices);
+    }
+>>>>>>> 94636f4c8282474e58ea8229711102e104966257
 
     /**
      * Returns the species of this shuffle.
@@ -557,7 +563,7 @@ public abstract class VectorShuffle<E> extends jdk.internal.vm.vector.VectorSupp
      * @param i the lane index
      * @return the {@code int} lane element at lane index {@code i}
      */
-    public int laneSource(int i) { return toArray()[i]; }
+    public abstract int laneSource(int i);
 
     /**
      * Rearranges the lane elements of this shuffle selecting lane indexes

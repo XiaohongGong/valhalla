@@ -80,6 +80,7 @@ bool VectorSupport::is_vector_mask(Klass* klass) {
   return klass->is_subclass_of(vmClasses::vector_VectorMask_klass());
 }
 
+<<<<<<< HEAD
 bool VectorSupport::is_vector_shuffle(Klass* klass) {
   return klass->is_subclass_of(vmClasses::vector_VectorShuffle_klass());
 }
@@ -89,19 +90,19 @@ bool VectorSupport::skip_value_scalarization(Klass* klass) {
          VectorSupport::is_vector_payload_mf(klass);
 }
 
+=======
+>>>>>>> 94636f4c8282474e58ea8229711102e104966257
 BasicType VectorSupport::klass2bt(InstanceKlass* ik) {
   assert(ik->is_subclass_of(vmClasses::vector_VectorPayload_klass()), "%s not a VectorPayload", ik->name()->as_C_string());
   fieldDescriptor fd; // find_field initializes fd if found
   // static final Class<?> ETYPE;
   Klass* holder = ik->find_field(vmSymbols::ETYPE_name(), vmSymbols::class_signature(), &fd);
 
-  assert(holder != NULL, "sanity");
+  assert(holder != nullptr, "sanity");
   assert(fd.is_static(), "");
   assert(fd.offset() > 0, "");
 
-  if (is_vector_shuffle(ik)) {
-    return T_BYTE;
-  } else if (is_vector_mask(ik)) {
+  if (is_vector_mask(ik)) {
     return T_BOOLEAN;
   } else { // vector and mask
     oop value = ik->java_mirror()->obj_field(fd.offset());
@@ -115,7 +116,7 @@ jint VectorSupport::klass2length(InstanceKlass* ik) {
   // static final int VLENGTH;
   Klass* holder = ik->find_field(vmSymbols::VLENGTH_name(), vmSymbols::int_signature(), &fd);
 
-  assert(holder != NULL, "sanity");
+  assert(holder != nullptr, "sanity");
   assert(fd.is_static(), "");
   assert(fd.offset() > 0, "");
 
@@ -300,12 +301,17 @@ InstanceKlass* VectorSupport::get_vector_payload_klass(BasicType elem_bt, int nu
 
 Handle VectorSupport::allocate_vector_payload(InstanceKlass* ik, int num_elem, BasicType elem_bt, frame* fr, RegisterMap* reg_map, ObjectValue* ov, TRAPS) {
   ScopeValue* payload = ov->field_at(0);
+  if (ov->field_size() == 2) {
+    // Long64 and Double64 are scalar quantities and occupy size equivalent to two VM words(VMReg)
+    assert(num_elem == 1 && type2size[elem_bt] == 2, "");
+    payload = ov->field_at(1);
+  }
   intptr_t is_larval = StackValue::create_stack_value(fr, reg_map, ov->is_larval())->get_int();
   jint larval = (jint)*((jint*)&is_larval);
 
   if (payload->is_location()) {
     Location location = payload->as_LocationValue()->location();
-    if (location.type() == Location::vector) {
+    if (location.type() == Location::vector || location.type() == Location::dbl || location.type() == Location::lng) {
       // Vector payload value in an aligned adjacent tuple (8, 16, 32 or 64 bytes).
       return allocate_vector_payload_helper(ik, num_elem, elem_bt, fr, reg_map, location, larval, THREAD); // safepoint
     }
@@ -328,7 +334,6 @@ Handle VectorSupport::allocate_vector_payload(InstanceKlass* ik, int num_elem, B
 
 instanceOop VectorSupport::allocate_vector_payload(InstanceKlass* ik, frame* fr, RegisterMap* reg_map, ObjectValue* ov, TRAPS) {
   assert(is_vector_payload_mf(ik), "%s not a vector payload", ik->name()->as_C_string());
-  assert(ov->field_size() == 1, "%s not a vector", ik->name()->as_C_string());
   assert(ik->is_inline_klass(), "");
 
   int num_elem = 0;
@@ -348,7 +353,6 @@ instanceOop VectorSupport::allocate_vector_payload(InstanceKlass* ik, frame* fr,
 
 instanceOop VectorSupport::allocate_vector(InstanceKlass* ik, frame* fr, RegisterMap* reg_map, ObjectValue* ov, TRAPS) {
   assert(is_vector(ik), "%s not a vector", ik->name()->as_C_string());
-  assert(ov->field_size() == 1, "%s not a vector", ik->name()->as_C_string());
   assert(ik->is_inline_klass(), "");
 
   int num_elem = klass2length(ik);

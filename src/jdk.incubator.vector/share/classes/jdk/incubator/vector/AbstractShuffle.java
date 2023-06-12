@@ -27,15 +27,17 @@ package jdk.incubator.vector;
 import java.util.function.IntUnaryOperator;
 import jdk.internal.misc.Unsafe;
 import jdk.internal.vm.annotation.ForceInline;
+import jdk.internal.vm.vector.VectorSupport;
 
 import static jdk.internal.vm.vector.VectorSupport.*;
 
 abstract class AbstractShuffle<E> extends VectorShuffle<E> {
     static final IntUnaryOperator IDENTITY = i -> i;
 
-    // Internal representation allows for a maximum index of 256
+    // Internal representation allows for a maximum index of E.MAX_VALUE - 1
     // Values are clipped to [-VLENGTH..VLENGTH-1].
 
+<<<<<<< HEAD
     static VectorPayloadMF prepare(int length, int[] reorder, int offset) {
         VectorPayloadMF payload = VectorPayloadMF.newInstanceFactory(byte.class, length);
         payload = Unsafe.getUnsafe().makePrivateBuffer(payload);
@@ -64,6 +66,11 @@ abstract class AbstractShuffle<E> extends VectorShuffle<E> {
 
     /*package-private*/
     abstract VectorPayloadMF reorder();
+=======
+    AbstractShuffle(Object indices) {
+        super(indices);
+    }
+>>>>>>> 94636f4c8282474e58ea8229711102e104966257
 
     /*package-private*/
     abstract AbstractSpecies<E> vspecies();
@@ -74,8 +81,25 @@ abstract class AbstractShuffle<E> extends VectorShuffle<E> {
         return vspecies();
     }
 
+    /*package-private*/
+    abstract AbstractVector<?> toBitsVector();
+
+    final AbstractVector<?> toBitsVectorTemplate() {
+        AbstractSpecies<?> dsp = vspecies().asIntegral();
+        Class<?> etype = dsp.elementType();
+        Class<?> rvtype = dsp.dummyVector().getClass();
+        return VectorSupport.convert(VectorSupport.VECTOR_OP_REINTERPRET,
+                                     getClass(), etype, length(),
+                                     rvtype, etype, length(),
+                                     this, dsp,
+                                     (v, s) -> v.toBitsVector0());
+    }
+
+    abstract AbstractVector<?> toBitsVector0();
+
     @Override
     @ForceInline
+<<<<<<< HEAD
     public void intoArray(int[] a, int offset) {
         VectorPayloadMF reorder = reorder();
         int vlen = reorder.length();
@@ -85,46 +109,61 @@ abstract class AbstractShuffle<E> extends VectorShuffle<E> {
             assert(sourceIndex >= -vlen && sourceIndex < vlen);
             a[offset + i] = sourceIndex;
         }
+=======
+    public final Vector<E> toVector() {
+        return toBitsVector().castShape(vspecies(), 0);
+>>>>>>> 94636f4c8282474e58ea8229711102e104966257
     }
 
     @Override
     @ForceInline
+<<<<<<< HEAD
     public int[] toArray() {
         VectorPayloadMF reorder = reorder();
         int[] a = new int[reorder.length()];
         intoArray(a, 0);
         return a;
+=======
+    public final int[] toArray() {
+        int[] res = new int[length()];
+        intoArray(res, 0);
+        return res;
+>>>>>>> 94636f4c8282474e58ea8229711102e104966257
     }
 
-    /*package-private*/
+    @Override
     @ForceInline
-    final
-    AbstractVector<E>
-    toVectorTemplate() {
-        // Note that the values produced by laneSource
-        // are already clipped.  At this point we convert
-        // them from internal ints (or bytes) into the ETYPE.
-        // FIXME: Use a conversion intrinsic for this operation.
-        // https://bugs.openjdk.org/browse/JDK-8225740
-        return (AbstractVector<E>) vspecies().fromIntValues(toArray());
+    public final <F> VectorShuffle<F> cast(VectorSpecies<F> s) {
+        if (length() != s.length()) {
+            throw new IllegalArgumentException("VectorShuffle length and species length differ");
+        }
+        return toBitsVector().toShuffle((AbstractSpecies<F>) s);
     }
 
+    @Override
     @ForceInline
     public final VectorShuffle<E> checkIndexes() {
         if (VectorIntrinsics.VECTOR_ACCESS_OOB_CHECK == 0) {
             return this;
         }
-        Vector<E> shufvec = this.toVector();
-        VectorMask<E> vecmask = shufvec.compare(VectorOperators.LT, vspecies().zero());
+        Vector<?> shufvec = this.toBitsVector();
+        VectorMask<?> vecmask = shufvec.compare(VectorOperators.LT, 0);
         if (vecmask.anyTrue()) {
+<<<<<<< HEAD
             VectorPayloadMF reorder = reorder();
             long offset = reorder.multiFieldOffset();
             throw checkIndexFailed(Unsafe.getUnsafe().getByte(reorder, offset + vecmask.firstTrue() * Byte.BYTES), length());
+=======
+            int[] indices = toArray();
+            throw checkIndexFailed(indices[vecmask.firstTrue()], length());
+>>>>>>> 94636f4c8282474e58ea8229711102e104966257
         }
         return this;
     }
 
+    @Override
     @ForceInline
+<<<<<<< HEAD
     public final VectorShuffle<E> wrapIndexes() {
         Vector<E> shufvec = this.toVector();
         VectorMask<E> vecmask = shufvec.compare(VectorOperators.LT, vspecies().zero());
@@ -156,12 +195,36 @@ abstract class AbstractShuffle<E> extends VectorShuffle<E> {
         }
         reorder = Unsafe.getUnsafe().finishPrivateBuffer(reorder);
         return vspecies().dummyVectorMF().shuffleFromBytes(reorder);
+=======
+    public final VectorMask<E> laneIsValid() {
+        Vector<?> shufvec = this.toBitsVector();
+        return shufvec.compare(VectorOperators.GE, 0)
+                      .cast(vspecies());
     }
 
     @ForceInline
-    public final VectorMask<E> laneIsValid() {
-        Vector<E> shufvec = this.toVector();
-        return shufvec.compare(VectorOperators.GE, vspecies().zero());
+    @Override
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    public final VectorShuffle<E> rearrange(VectorShuffle<E> shuffle) {
+        Vector v = toBitsVector();
+        return (VectorShuffle<E>) v.rearrange(shuffle.cast(vspecies().asIntegral()))
+                                   .toShuffle()
+                                   .cast(vspecies());
+>>>>>>> 94636f4c8282474e58ea8229711102e104966257
+    }
+
+    @ForceInline
+    @Override
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    public final VectorShuffle<E> wrapIndexes() {
+        Vector v = toBitsVector();
+        if ((length() & (length() - 1)) == 0) {
+            v = v.lanewise(VectorOperators.AND, length() - 1);
+        } else {
+            v = v.blend(v.lanewise(VectorOperators.ADD, length()),
+                        v.compare(VectorOperators.LT, 0));
+        }
+        return (VectorShuffle<E>) v.toShuffle().cast(vspecies());
     }
 
     @Override
@@ -215,6 +278,7 @@ abstract class AbstractShuffle<E> extends VectorShuffle<E> {
         String msg = "required an index in [0.."+max+"] but found "+index;
         return new IndexOutOfBoundsException(msg);
     }
+<<<<<<< HEAD
 
     static boolean indexesInRange(VectorPayloadMF reorder) {
         int length = reorder.length();
@@ -234,4 +298,6 @@ abstract class AbstractShuffle<E> extends VectorShuffle<E> {
         }
         return true;
     }
+=======
+>>>>>>> 94636f4c8282474e58ea8229711102e104966257
 }

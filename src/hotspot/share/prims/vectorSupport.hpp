@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -152,7 +152,10 @@ class VectorSupport : AllStatic {
   static bool is_vector(Klass* klass);
   static bool is_vector_payload_mf(Klass* klass);
   static bool is_vector_mask(Klass* klass);
+<<<<<<< HEAD
   static bool is_vector_shuffle(Klass* klass);
   static bool skip_value_scalarization(Klass* klass);
+=======
+>>>>>>> 94636f4c8282474e58ea8229711102e104966257
 };
 #endif // SHARE_PRIMS_VECTORSUPPORT_HPP
