@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -55,25 +55,23 @@ value class Long128Vector extends LongVector {
 
     static final Class<Long> ETYPE = long.class; // used by the JVM
 
-    static final long MFOFFSET = VectorPayloadMF.multiFieldOffset(VectorSupport.VectorPayloadMF128.class);
+    static final long MFOFFSET = VectorPayloadMF.multiFieldOffset(VectorPayloadMF128L.class);
 
-    private final VectorSupport.VectorPayloadMF128 payload;
+    private final VectorPayloadMF128L payload;
 
     Long128Vector(Object value) {
-        this.payload = (VectorSupport.VectorPayloadMF128)value;
+        this.payload = (VectorPayloadMF128L) value;
     }
 
-    VectorPayloadMF vec_mf() {
+    @ForceInline
+    @Override
+    final VectorPayloadMF vec() {
         return payload;
     }
 
-    @Override
-    protected final Object getPayload() {
-       return vec_mf();
-    }
+    static final Long128Vector ZERO = new Long128Vector(createPayloadInstance(VSPECIES));
 
-    static final Long128Vector ZERO = new Long128Vector(VectorPayloadMF.createVectPayloadInstance(Long.BYTES, 2));
-    static final Long128Vector IOTA = new Long128Vector(VectorPayloadMF.createVectPayloadInstanceL(Long.BYTES, 2, (long [])(VSPECIES.iotaArray())));
+    static final Long128Vector IOTA = new Long128Vector(VectorPayloadMF.createVectPayloadInstanceL(2, (long[])(VSPECIES.iotaArray()), false));
 
     static {
         // Warm up a few species caches.
@@ -122,15 +120,6 @@ value class Long128Vector extends LongVector {
     @Override
     public final long multiFieldOffset() { return MFOFFSET; }
 
-    /*package-private*/
-    @ForceInline
-    final @Override
-    long[] vec() {
-        return (long[])getPayload();
-    }
-
-    // Virtualized constructors
-
     @Override
     @ForceInline
     public final Long128Vector broadcast(long e) {
@@ -140,43 +129,21 @@ value class Long128Vector extends LongVector {
 
     @Override
     @ForceInline
-    Long128Mask maskFromArray(boolean[] bits) {
-        return new Long128Mask(bits);
+    Long128Mask maskFromPayload(VectorPayloadMF payload) {
+        return new Long128Mask(payload);
     }
 
     @Override
     @ForceInline
     Long128Shuffle iotaShuffle() { return Long128Shuffle.IOTA; }
 
-    @ForceInline
-    Long128Shuffle iotaShuffle(int start, int step, boolean wrap) {
-      if (wrap) {
-        return (Long128Shuffle)VectorSupport.shuffleIota(ETYPE, Long128Shuffle.class, VSPECIES, VLENGTH, start, step, 1,
-                (l, lstart, lstep, s) -> s.shuffleFromOp(i -> (VectorIntrinsics.wrapToRange(i*lstep + lstart, l))));
-      } else {
-        return (Long128Shuffle)VectorSupport.shuffleIota(ETYPE, Long128Shuffle.class, VSPECIES, VLENGTH, start, step, 0,
-                (l, lstart, lstep, s) -> s.shuffleFromOp(i -> (i*lstep + lstart)));
-      }
-    }
-
     @Override
     @ForceInline
-    Long128Shuffle shuffleFromBytes(byte[] reorder) { return new Long128Shuffle(reorder); }
-
-    @Override
-    @ForceInline
-    Long128Shuffle shuffleFromArray(int[] indexes, int i) { return new Long128Shuffle(indexes, i); }
+    Long128Shuffle shuffleFromArray(int[] indices, int i) { return new Long128Shuffle(indices, i); }
 
     @Override
     @ForceInline
     Long128Shuffle shuffleFromOp(IntUnaryOperator fn) { return new Long128Shuffle(fn); }
-
-    // Make a vector of the same species but the given elements:
-    @ForceInline
-    final @Override
-    Long128Vector vectorFactory(long[] vec) {
-        return new Long128Vector(vec);
-    }
 
     // Make a vector of the same species but the given elements:
     @ForceInline
@@ -371,9 +338,11 @@ value class Long128Vector extends LongVector {
         return (long) super.reduceLanesTemplate(op, Long128Mask.class, (Long128Mask) m);  // specialized
     }
 
+    @Override
     @ForceInline
-    public VectorShuffle<Long> toShuffle() {
-        return super.toShuffleTemplate(Long128Shuffle.class); // specialize
+    public final
+    <F> VectorShuffle<F> toShuffle(AbstractSpecies<F> dsp) {
+        return super.toShuffleTemplate(dsp);
     }
 
     // Specialized unary testing
@@ -531,7 +500,7 @@ value class Long128Vector extends LongVector {
                              VCLASS, ETYPE, VLENGTH,
                              this, i,
                              (vec, ix) -> {
-                                 VectorPayloadMF vecpayload = vec.vec_mf();
+                                 VectorPayloadMF vecpayload = vec.vec();
                                  long start_offset = vecpayload.multiFieldOffset();
                                  return (long)Unsafe.getUnsafe().getLong(vecpayload, start_offset + ix * Long.BYTES);
                              });
@@ -552,7 +521,7 @@ value class Long128Vector extends LongVector {
                                 VCLASS, ETYPE, VLENGTH,
                                 this, i, (long)e,
                                 (v, ix, bits) -> {
-                                    VectorPayloadMF vec = v.vec_mf();
+                                    VectorPayloadMF vec = v.vec();
                                     VectorPayloadMF tpayload = Unsafe.getUnsafe().makePrivateBuffer(vec);
                                     long start_offset = tpayload.multiFieldOffset();
                                     Unsafe.getUnsafe().putLong(tpayload, start_offset + ix * Long.BYTES, (long)bits);
@@ -563,34 +532,24 @@ value class Long128Vector extends LongVector {
 
     // Mask
 
-    static final class Long128Mask extends AbstractMask<Long> {
+    static final value class Long128Mask extends AbstractMask<Long> {
         static final int VLENGTH = VSPECIES.laneCount();    // used by the JVM
         static final Class<Long> ETYPE = long.class; // used by the JVM
 
-        Long128Mask(boolean[] bits) {
-            this(bits, 0);
+        static final long MFOFFSET = VectorPayloadMF.multiFieldOffset(VectorPayloadMF16Z.class);
+
+        private final VectorPayloadMF16Z payload;
+
+        Long128Mask(VectorPayloadMF payload) {
+            this.payload = (VectorPayloadMF16Z) payload;
         }
 
-        Long128Mask(boolean[] bits, int offset) {
-            super(prepare(bits, offset));
+        Long128Mask(VectorPayloadMF payload, int offset) {
+            this(prepare(payload, offset, VSPECIES));
         }
 
         Long128Mask(boolean val) {
-            super(prepare(val));
-        }
-
-        private static boolean[] prepare(boolean[] bits, int offset) {
-            boolean[] newBits = new boolean[VSPECIES.laneCount()];
-            for (int i = 0; i < newBits.length; i++) {
-                newBits[i] = bits[offset + i];
-            }
-            return newBits;
-        }
-
-        private static boolean[] prepare(boolean val) {
-            boolean[] bits = new boolean[VSPECIES.laneCount()];
-            Arrays.fill(bits, val);
-            return bits;
+            this(prepare(val, VSPECIES));
         }
 
         @ForceInline
@@ -603,30 +562,14 @@ value class Long128Vector extends LongVector {
         }
 
         @ForceInline
-        boolean[] getBits() {
-            return (boolean[])getPayload();
+        @Override
+        final VectorPayloadMF getBits() {
+            return payload;
         }
 
+        @ForceInline
         @Override
-        Long128Mask uOp(MUnOp f) {
-            boolean[] res = new boolean[vspecies().laneCount()];
-            boolean[] bits = getBits();
-            for (int i = 0; i < res.length; i++) {
-                res[i] = f.apply(i, bits[i]);
-            }
-            return new Long128Mask(res);
-        }
-
-        @Override
-        Long128Mask bOp(VectorMask<Long> m, MBinOp f) {
-            boolean[] res = new boolean[vspecies().laneCount()];
-            boolean[] bits = getBits();
-            boolean[] mbits = ((Long128Mask)m).getBits();
-            for (int i = 0; i < res.length; i++) {
-                res[i] = f.apply(i, bits[i], mbits[i]);
-            }
-            return new Long128Mask(res);
-        }
+        public final long multiFieldOffset() { return MFOFFSET; }
 
         @ForceInline
         @Override
@@ -635,39 +578,13 @@ value class Long128Vector extends LongVector {
             return (Long128Vector) super.toVectorTemplate();  // specialize
         }
 
-        /**
-         * Helper function for lane-wise mask conversions.
-         * This function kicks in after intrinsic failure.
-         */
-        @ForceInline
-        private final <E>
-        VectorMask<E> defaultMaskCast(AbstractSpecies<E> dsp) {
-            if (length() != dsp.laneCount())
-                throw new IllegalArgumentException("VectorMask length and species length differ");
-            boolean[] maskArray = toArray();
-            return  dsp.maskFactory(maskArray).check(dsp);
-        }
-
         @Override
         @ForceInline
-        public <E> VectorMask<E> cast(VectorSpecies<E> dsp) {
-            AbstractSpecies<E> species = (AbstractSpecies<E>) dsp;
-            if (length() != species.laneCount())
-                throw new IllegalArgumentException("VectorMask length and species length differ");
-
-            return VectorSupport.convert(VectorSupport.VECTOR_OP_CAST,
-                this.getClass(), ETYPE, VLENGTH,
-                species.maskType(), species.elementType(), VLENGTH,
-                this, species,
-                (m, s) -> s.maskFactory(m.toArray()).check(s));
-        }
-
-        @Override
-        @ForceInline
-        public Long128Mask eq(VectorMask<Long> mask) {
-            Objects.requireNonNull(mask);
-            Long128Mask m = (Long128Mask)mask;
-            return xor(m.not());
+        /*package-private*/
+        Long128Mask indexPartiallyInUpperRange(long offset, long limit) {
+            return (Long128Mask) VectorSupport.indexPartiallyInUpperRange(
+                Long128Mask.class, long.class, VLENGTH, offset, limit,
+                (o, l) -> (Long128Mask) TRUE_MASK.indexPartiallyInRange(o, l));
         }
 
         // Unary operations
@@ -681,7 +598,7 @@ value class Long128Vector extends LongVector {
         @Override
         @ForceInline
         public Long128Mask compress() {
-            return (Long128Mask)VectorSupport.compressExpandOp(VectorSupport.VECTOR_OP_MASK_COMPRESS,
+            return (Long128Mask) VectorSupport.compressExpandOp(VectorSupport.VECTOR_OP_MASK_COMPRESS,
                 Long128Vector.class, Long128Mask.class, ETYPE, VLENGTH, null, this,
                 (v1, m1) -> VSPECIES.iota().compare(VectorOperators.LT, m1.trueCount()));
         }
@@ -694,9 +611,9 @@ value class Long128Vector extends LongVector {
         public Long128Mask and(VectorMask<Long> mask) {
             Objects.requireNonNull(mask);
             Long128Mask m = (Long128Mask)mask;
-            return VectorSupport.binaryOp(VECTOR_OP_AND, Long128Mask.class, null, long.class, VLENGTH,
-                                          this, m, null,
-                                          (m1, m2, vm) -> m1.bOp(m2, (i, a, b) -> a & b));
+            return VectorSupport.binaryOp(VECTOR_OP_AND, Long128Mask.class, null,
+                                          long.class, VLENGTH, this, m, null,
+                                          (m1, m2, vm) -> (Long128Mask) m1.bOpMF(m2, (i, a, b) -> a & b));
         }
 
         @Override
@@ -704,19 +621,19 @@ value class Long128Vector extends LongVector {
         public Long128Mask or(VectorMask<Long> mask) {
             Objects.requireNonNull(mask);
             Long128Mask m = (Long128Mask)mask;
-            return VectorSupport.binaryOp(VECTOR_OP_OR, Long128Mask.class, null, long.class, VLENGTH,
-                                          this, m, null,
-                                          (m1, m2, vm) -> m1.bOp(m2, (i, a, b) -> a | b));
+            return VectorSupport.binaryOp(VECTOR_OP_OR, Long128Mask.class, null,
+                                          long.class, VLENGTH, this, m, null,
+                                          (m1, m2, vm) -> (Long128Mask) m1.bOpMF(m2, (i, a, b) -> a | b));
         }
 
+        @Override
         @ForceInline
-        /* package-private */
-        Long128Mask xor(VectorMask<Long> mask) {
+        public Long128Mask xor(VectorMask<Long> mask) {
             Objects.requireNonNull(mask);
             Long128Mask m = (Long128Mask)mask;
-            return VectorSupport.binaryOp(VECTOR_OP_XOR, Long128Mask.class, null, long.class, VLENGTH,
-                                          this, m, null,
-                                          (m1, m2, vm) -> m1.bOp(m2, (i, a, b) -> a ^ b));
+            return VectorSupport.binaryOp(VECTOR_OP_XOR, Long128Mask.class, null,
+                                          long.class, VLENGTH, this, m, null,
+                                          (m1, m2, vm) -> (Long128Mask) m1.bOpMF(m2, (i, a, b) -> a ^ b));
         }
 
         // Mask Query operations
@@ -725,21 +642,21 @@ value class Long128Vector extends LongVector {
         @ForceInline
         public int trueCount() {
             return (int) VectorSupport.maskReductionCoerced(VECTOR_OP_MASK_TRUECOUNT, Long128Mask.class, long.class, VLENGTH, this,
-                                                      (m) -> trueCountHelper(m.getBits()));
+                                                            (m) -> ((Long128Mask) m).trueCountHelper());
         }
 
         @Override
         @ForceInline
         public int firstTrue() {
             return (int) VectorSupport.maskReductionCoerced(VECTOR_OP_MASK_FIRSTTRUE, Long128Mask.class, long.class, VLENGTH, this,
-                                                      (m) -> firstTrueHelper(m.getBits()));
+                                                            (m) -> ((Long128Mask) m).firstTrueHelper());
         }
 
         @Override
         @ForceInline
         public int lastTrue() {
             return (int) VectorSupport.maskReductionCoerced(VECTOR_OP_MASK_LASTTRUE, Long128Mask.class, long.class, VLENGTH, this,
-                                                      (m) -> lastTrueHelper(m.getBits()));
+                                                            (m) -> ((Long128Mask) m).lastTrueHelper());
         }
 
         @Override
@@ -749,7 +666,7 @@ value class Long128Vector extends LongVector {
                 throw new UnsupportedOperationException("too many lanes for one long");
             }
             return VectorSupport.maskReductionCoerced(VECTOR_OP_MASK_TOLONG, Long128Mask.class, long.class, VLENGTH, this,
-                                                      (m) -> toLongHelper(m.getBits()));
+                                                      (m) -> ((Long128Mask) m).toLongHelper());
         }
 
         // Reductions
@@ -759,7 +676,7 @@ value class Long128Vector extends LongVector {
         public boolean anyTrue() {
             return VectorSupport.test(BT_ne, Long128Mask.class, long.class, VLENGTH,
                                          this, vspecies().maskAll(true),
-                                         (m, __) -> anyTrueHelper(((Long128Mask)m).getBits()));
+                                         (m, __) -> ((Long128Mask) m).anyTrueHelper());
         }
 
         @Override
@@ -767,7 +684,7 @@ value class Long128Vector extends LongVector {
         public boolean allTrue() {
             return VectorSupport.test(BT_overflow, Long128Mask.class, long.class, VLENGTH,
                                          this, vspecies().maskAll(true),
-                                         (m, __) -> allTrueHelper(((Long128Mask)m).getBits()));
+                                         (m, __) -> ((Long128Mask) m).allTrueHelper());
         }
 
         @ForceInline
@@ -784,27 +701,34 @@ value class Long128Vector extends LongVector {
 
     // Shuffle
 
-    static final class Long128Shuffle extends AbstractShuffle<Long> {
+    static final value class Long128Shuffle extends AbstractShuffle<Long> {
         static final int VLENGTH = VSPECIES.laneCount();    // used by the JVM
         static final Class<Long> ETYPE = long.class; // used by the JVM
 
-        Long128Shuffle(byte[] reorder) {
-            super(VLENGTH, reorder);
+        private final VectorPayloadMF128L payload;
+
+        Long128Shuffle(VectorPayloadMF payload) {
+            this.payload = (VectorPayloadMF128L) payload;
+            //assert(VLENGTH == payload.length());
+            assert(indicesInRange(payload));
         }
 
-        public Long128Shuffle(int[] reorder) {
-            super(VLENGTH, reorder);
+        Long128Shuffle(int[] indices, int i) {
+            this(prepare(indices, i));
         }
 
-        public Long128Shuffle(int[] reorder, int i) {
-            super(VLENGTH, reorder, i);
+        Long128Shuffle(IntUnaryOperator fn) {
+            this(prepare(fn));
         }
 
-        public Long128Shuffle(IntUnaryOperator fn) {
-            super(VLENGTH, fn);
+        @ForceInline
+        @Override
+        protected final VectorPayloadMF indices() {
+            return payload;
         }
 
         @Override
+        @ForceInline
         public LongSpecies vspecies() {
             return VSPECIES;
         }
@@ -812,40 +736,103 @@ value class Long128Vector extends LongVector {
         static {
             // There must be enough bits in the shuffle lanes to encode
             // VLENGTH valid indexes and VLENGTH exceptional ones.
-            assert(VLENGTH < Byte.MAX_VALUE);
-            assert(Byte.MIN_VALUE <= -VLENGTH);
+            assert(VLENGTH < Long.MAX_VALUE);
+            assert(Long.MIN_VALUE <= -VLENGTH);
         }
         static final Long128Shuffle IOTA = new Long128Shuffle(IDENTITY);
 
         @Override
         @ForceInline
-        public Long128Vector toVector() {
-            return VectorSupport.shuffleToVector(VCLASS, ETYPE, Long128Shuffle.class, this, VLENGTH,
-                                                    (s) -> ((Long128Vector)(((AbstractShuffle<Long>)(s)).toVectorTemplate())));
+        Long128Vector toBitsVector() {
+            return (Long128Vector) super.toBitsVectorTemplate();
         }
 
         @Override
         @ForceInline
-        public <F> VectorShuffle<F> cast(VectorSpecies<F> s) {
-            AbstractSpecies<F> species = (AbstractSpecies<F>) s;
-            if (length() != species.laneCount())
-                throw new IllegalArgumentException("VectorShuffle length and species length differ");
-            int[] shuffleArray = toArray();
-            return s.shuffleFromArray(shuffleArray, 0).check(s);
+        LongVector toBitsVector0() {
+            return Long128Vector.VSPECIES.dummyVectorMF().vectorFactory(indices());
         }
 
-        @ForceInline
         @Override
-        public Long128Shuffle rearrange(VectorShuffle<Long> shuffle) {
-            Long128Shuffle s = (Long128Shuffle) shuffle;
-            byte[] reorder1 = reorder();
-            byte[] reorder2 = s.reorder();
-            byte[] r = new byte[reorder1.length];
-            for (int i = 0; i < reorder1.length; i++) {
-                int ssi = reorder2[i];
-                r[i] = reorder1[ssi];  // throws on exceptional index
+        @ForceInline
+        public int laneSource(int i) {
+            return (int)toBitsVector().lane(i);
+        }
+
+        @Override
+        @ForceInline
+        public void intoArray(int[] a, int offset) {
+            switch (length()) {
+                case 1 -> a[offset] = laneSource(0);
+                case 2 -> toBitsVector()
+                        .convertShape(VectorOperators.L2I, IntVector.SPECIES_64, 0)
+                        .reinterpretAsInts()
+                        .intoArray(a, offset);
+                case 4 -> toBitsVector()
+                        .convertShape(VectorOperators.L2I, IntVector.SPECIES_128, 0)
+                        .reinterpretAsInts()
+                        .intoArray(a, offset);
+                case 8 -> toBitsVector()
+                        .convertShape(VectorOperators.L2I, IntVector.SPECIES_256, 0)
+                        .reinterpretAsInts()
+                        .intoArray(a, offset);
+                case 16 -> toBitsVector()
+                        .convertShape(VectorOperators.L2I, IntVector.SPECIES_512, 0)
+                        .reinterpretAsInts()
+                        .intoArray(a, offset);
+                default -> {
+                    VectorIntrinsics.checkFromIndexSize(offset, length(), a.length);
+                    for (int i = 0; i < length(); i++) {
+                        a[offset + i] = laneSource(i);
+                    }
+                }
             }
-            return new Long128Shuffle(r);
+        }
+
+        private static VectorPayloadMF prepare(int[] indices, int offset) {
+            VectorPayloadMF payload = createPayloadInstance(VSPECIES);
+            payload = Unsafe.getUnsafe().makePrivateBuffer(payload);
+            long mfOffset = payload.multiFieldOffset();
+            for (int i = 0; i < VLENGTH; i++) {
+                int si = indices[offset + i];
+                si = partiallyWrapIndex(si, VLENGTH);
+                Unsafe.getUnsafe().putLong(payload, mfOffset + i * Long.BYTES, (long) si);
+            }
+            payload = Unsafe.getUnsafe().finishPrivateBuffer(payload);
+            return payload;
+        }
+
+        private static VectorPayloadMF prepare(IntUnaryOperator f) {
+            VectorPayloadMF payload = createPayloadInstance(VSPECIES);
+            payload = Unsafe.getUnsafe().makePrivateBuffer(payload);
+            long offset = payload.multiFieldOffset();
+            for (int i = 0; i < VLENGTH; i++) {
+                int si = f.applyAsInt(i);
+                si = partiallyWrapIndex(si, VLENGTH);
+                Unsafe.getUnsafe().putLong(payload, offset + i * Long.BYTES, (long) si);
+            }
+            payload = Unsafe.getUnsafe().finishPrivateBuffer(payload);
+            return payload;
+        }
+
+
+        private static boolean indicesInRange(VectorPayloadMF indices) {
+            int length = VLENGTH;
+            long offset = indices.multiFieldOffset();
+            for (int i = 0; i < length; i++) {
+                long si = Unsafe.getUnsafe().getLong(indices, offset + i * Long.BYTES);
+                if (si >= length || si < -length) {
+                    boolean assertsEnabled = false;
+                    assert(assertsEnabled = true);
+                    if (assertsEnabled) {
+                        String msg = ("index "+si+"out of range ["+length+"] in "+
+                                indices.toString());
+                        throw new AssertionError(msg);
+                    }
+                    return false;
+                }
+            }
+            return true;
         }
     }
 

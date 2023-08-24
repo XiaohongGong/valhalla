@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,6 +30,7 @@
 #include "ci/ciFlags.hpp"
 #include "ci/ciInstance.hpp"
 #include "ci/ciUtilities.hpp"
+#include "utilities/growableArray.hpp"
 
 // ciField
 //
@@ -40,6 +41,7 @@ class ciField : public ArenaObj {
   CI_PACKAGE_ACCESS
   friend class ciEnv;
   friend class ciInstanceKlass;
+  friend class ciMultiField;
 
 private:
   ciFlags          _flags;
@@ -52,6 +54,8 @@ private:
   bool             _is_constant;
   bool             _is_flattened;
   bool             _is_null_free;
+  bool             _is_multifield;
+  bool             _is_multifield_base;
   ciMethod*        _known_to_link_with_put;
   ciInstanceKlass* _known_to_link_with_get;
   ciConstant       _constant_value;
@@ -59,7 +63,7 @@ private:
   ciType* compute_type();
   ciType* compute_type_impl();
 
-  ciField(ciInstanceKlass* klass, int index);
+  ciField(ciInstanceKlass* klass, int index, Bytecodes::Code bc);
   ciField(fieldDescriptor* fd);
   ciField(ciField* field, ciInstanceKlass* holder, int offset, bool is_final);
 
@@ -103,23 +107,22 @@ public:
   ciSymbol* signature() const { return _signature; }
 
   // Of what type is this field?
-  ciType* type() { return (_type == NULL) ? compute_type() : _type; }
+  ciType* type() { return (_type == nullptr) ? compute_type() : _type; }
+
+  bool is_multifield() { return _is_multifield; }
+  bool is_multifield_base() { return _is_multifield_base; }
+  int secondary_fields_count() { return type()->bundle_size(); } const
 
   // How is this field actually stored in memory?
-  BasicType layout_type() { return type2field[type()->basic_type()]; }
+  BasicType layout_type() { return type2field[(_type == nullptr) ? T_OBJECT : _type->basic_type()]; }
 
   // How big is this field in memory?
   int size_in_bytes() { return type2aelembytes(layout_type()); }
 
-  // What is the offset of this field?
-  int offset() const {
+  // What is the offset of this field? (Fields are aligned to the byte level.)
+  int offset_in_bytes() const {
     assert(_offset >= 1, "illegal call to offset()");
     return _offset;
-  }
-
-  // Same question, explicit units.  (Fields are aligned to the byte level.)
-  int offset_in_bytes() const {
-    return offset();
   }
 
   // Is this field shared?
@@ -192,6 +195,37 @@ public:
   // Debugging output
   void print();
   void print_name_on(outputStream* st);
+};
+
+class ciMultiField : public ciField {
+private:
+  CI_PACKAGE_ACCESS
+  friend class ciInstanceKlass;
+
+  GrowableArray<ciField*>* _secondary_fields;
+
+  ciMultiField(ciInstanceKlass* klass, int index, Bytecodes::Code bc) : ciField(klass, index, bc) {}
+  ciMultiField(fieldDescriptor* fd) : ciField(fd) {}
+  ciMultiField(ciField* field, ciInstanceKlass* holder, int offset, bool is_final) :
+       ciField(field, holder, offset, is_final) {}
+public:
+  void set_secondary_fields(GrowableArray<ciField*>* fields) {
+     Arena* arena = CURRENT_ENV->arena();
+     _secondary_fields = new (arena) GrowableArray<ciField*>(arena, fields->length(), 0, nullptr);
+     for (int i = 0; i < fields->length(); i++) {
+       ciField* field = fields->at(i);
+       _secondary_fields->append(new (arena) ciField(field, field->holder(), field->offset_in_bytes(), field->is_final()));
+     }
+  }
+
+  void add_secondary_fields(GrowableArray<ciField*>* fields) { _secondary_fields = fields; }
+
+  GrowableArray<ciField*>* secondary_fields() { return _secondary_fields; }
+
+  ciField* secondary_field_at(int i) {
+    assert(_secondary_fields->length() > i, "");
+    return _secondary_fields->at(i);
+  }
 };
 
 #endif // SHARE_CI_CIFIELD_HPP

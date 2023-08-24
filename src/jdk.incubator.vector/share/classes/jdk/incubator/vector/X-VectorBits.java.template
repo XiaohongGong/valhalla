@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -55,25 +55,27 @@ value class $vectortype$ extends $abstractvectortype$ {
 
     static final Class<$Boxtype$> ETYPE = $type$.class; // used by the JVM
 
-    static final long MFOFFSET = VectorPayloadMF.multiFieldOffset(VectorSupport.VectorPayloadMF$bits$.class);
+    static final long MFOFFSET = VectorPayloadMF.multiFieldOffset(VectorPayloadMF$bits$$Boxinitials$.class);
 
-    private final VectorSupport.VectorPayloadMF$bits$ payload;
+    private final VectorPayloadMF$bits$$Boxinitials$ payload;
 
     $vectortype$(Object value) {
-        this.payload = (VectorSupport.VectorPayloadMF$bits$)value;
+        this.payload = (VectorPayloadMF$bits$$Boxinitials$) value;
     }
 
-    VectorPayloadMF vec_mf() {
+    @ForceInline
+    @Override
+    final VectorPayloadMF vec() {
         return payload;
     }
 
-    @Override
-    protected final Object getPayload() {
-       return vec_mf();
-    }
+    static final $vectortype$ ZERO = new $vectortype$(createPayloadInstance(VSPECIES));
 
-    static final $vectortype$ ZERO = new $vectortype$(VectorPayloadMF.createVectPayloadInstance($Boxtype$.BYTES, $numLanes$));
-    static final $vectortype$ IOTA = new $vectortype$(VectorPayloadMF.createVectPayloadInstance$Boxinitials$($Boxtype$.BYTES, $numLanes$, ($type$ [])(VSPECIES.iotaArray())));
+#if[!Max]
+    static final $vectortype$ IOTA = new $vectortype$(VectorPayloadMF.createVectPayloadInstance$Boxinitials$($numLanes$, ($type$[])(VSPECIES.iotaArray()), false));
+#else[!Max]
+    static final $vectortype$ IOTA = new $vectortype$(VectorPayloadMF.createVectPayloadInstance$Boxinitials$(VLENGTH, ($type$[])(VSPECIES.iotaArray()), true));
+#end[!Max]
 
     static {
         // Warm up a few species caches.
@@ -122,15 +124,6 @@ value class $vectortype$ extends $abstractvectortype$ {
     @Override
     public final long multiFieldOffset() { return MFOFFSET; }
 
-    /*package-private*/
-    @ForceInline
-    final @Override
-    $type$[] vec() {
-        return ($type$[])getPayload();
-    }
-
-    // Virtualized constructors
-
     @Override
     @ForceInline
     public final $vectortype$ broadcast($type$ e) {
@@ -147,43 +140,21 @@ value class $vectortype$ extends $abstractvectortype$ {
 
     @Override
     @ForceInline
-    $masktype$ maskFromArray(boolean[] bits) {
-        return new $masktype$(bits);
+    $masktype$ maskFromPayload(VectorPayloadMF payload) {
+        return new $masktype$(payload);
     }
 
     @Override
     @ForceInline
     $shuffletype$ iotaShuffle() { return $shuffletype$.IOTA; }
 
-    @ForceInline
-    $shuffletype$ iotaShuffle(int start, int step, boolean wrap) {
-      if (wrap) {
-        return ($shuffletype$)VectorSupport.shuffleIota(ETYPE, $shuffletype$.class, VSPECIES, VLENGTH, start, step, 1,
-                (l, lstart, lstep, s) -> s.shuffleFromOp(i -> (VectorIntrinsics.wrapToRange(i*lstep + lstart, l))));
-      } else {
-        return ($shuffletype$)VectorSupport.shuffleIota(ETYPE, $shuffletype$.class, VSPECIES, VLENGTH, start, step, 0,
-                (l, lstart, lstep, s) -> s.shuffleFromOp(i -> (i*lstep + lstart)));
-      }
-    }
-
     @Override
     @ForceInline
-    $shuffletype$ shuffleFromBytes(byte[] reorder) { return new $shuffletype$(reorder); }
-
-    @Override
-    @ForceInline
-    $shuffletype$ shuffleFromArray(int[] indexes, int i) { return new $shuffletype$(indexes, i); }
+    $shuffletype$ shuffleFromArray(int[] indices, int i) { return new $shuffletype$(indices, i); }
 
     @Override
     @ForceInline
     $shuffletype$ shuffleFromOp(IntUnaryOperator fn) { return new $shuffletype$(fn); }
-
-    // Make a vector of the same species but the given elements:
-    @ForceInline
-    final @Override
-    $vectortype$ vectorFactory($type$[] vec) {
-        return new $vectortype$(vec);
-    }
 
     // Make a vector of the same species but the given elements:
     @ForceInline
@@ -380,9 +351,11 @@ value class $vectortype$ extends $abstractvectortype$ {
         return (long) super.reduceLanesTemplate(op, $masktype$.class, ($masktype$) m);  // specialized
     }
 
+    @Override
     @ForceInline
-    public VectorShuffle<$Boxtype$> toShuffle() {
-        return super.toShuffleTemplate($shuffletype$.class); // specialize
+    public final
+    <F> VectorShuffle<F> toShuffle(AbstractSpecies<F> dsp) {
+        return super.toShuffleTemplate(dsp);
     }
 
     // Specialized unary testing
@@ -579,7 +552,7 @@ value class $vectortype$ extends $abstractvectortype$ {
                      VCLASS, ETYPE, VLENGTH,
                      this, i,
                      (vec, ix) -> {
-                         VectorPayloadMF vecpayload = vec.vec_mf();
+                         VectorPayloadMF vecpayload = vec.vec();
                          long start_offset = vecpayload.multiFieldOffset();
                          return (long)$Type$.$type$To$Bitstype$Bits(Unsafe.getUnsafe().get$Type$(vecpayload, start_offset + ix * $Boxtype$.BYTES));
                      });
@@ -629,7 +602,7 @@ value class $vectortype$ extends $abstractvectortype$ {
                                 VCLASS, ETYPE, VLENGTH,
                                 this, i, (long)$Type$.$type$To$Bitstype$Bits(e),
                                 (v, ix, bits) -> {
-                                    VectorPayloadMF vec = v.vec_mf();
+                                    VectorPayloadMF vec = v.vec();
                                     VectorPayloadMF tpayload = Unsafe.getUnsafe().makePrivateBuffer(vec);
                                     long start_offset = tpayload.multiFieldOffset();
                                     Unsafe.getUnsafe().put$Type$(tpayload, start_offset + ix * $Boxtype$.BYTES, $Type$.$bitstype$BitsTo$Type$(($bitstype$)bits));
@@ -734,7 +707,7 @@ value class $vectortype$ extends $abstractvectortype$ {
                              VCLASS, ETYPE, VLENGTH,
                              this, i,
                              (vec, ix) -> {
-                                 VectorPayloadMF vecpayload = vec.vec_mf();
+                                 VectorPayloadMF vecpayload = vec.vec();
                                  long start_offset = vecpayload.multiFieldOffset();
                                  return (long)Unsafe.getUnsafe().get$Type$(vecpayload, start_offset + ix * $Boxtype$.BYTES);
                              });
@@ -836,7 +809,7 @@ value class $vectortype$ extends $abstractvectortype$ {
                                 VCLASS, ETYPE, VLENGTH,
                                 this, i, (long)e,
                                 (v, ix, bits) -> {
-                                    VectorPayloadMF vec = v.vec_mf();
+                                    VectorPayloadMF vec = v.vec();
                                     VectorPayloadMF tpayload = Unsafe.getUnsafe().makePrivateBuffer(vec);
                                     long start_offset = tpayload.multiFieldOffset();
                                     Unsafe.getUnsafe().put$Type$(tpayload, start_offset + ix * $Boxtype$.BYTES, ($type$)bits);
@@ -848,34 +821,34 @@ value class $vectortype$ extends $abstractvectortype$ {
 
     // Mask
 
-    static final class $masktype$ extends AbstractMask<$Boxtype$> {
+    static final value class $masktype$ extends AbstractMask<$Boxtype$> {
         static final int VLENGTH = VSPECIES.laneCount();    // used by the JVM
         static final Class<$Boxtype$> ETYPE = $type$.class; // used by the JVM
 
-        $masktype$(boolean[] bits) {
-            this(bits, 0);
+#if[!Max]
+        static final long MFOFFSET = VectorPayloadMF.multiFieldOffset(VectorPayloadMF$vectorsizeinbytes$Z.class);
+
+        private final VectorPayloadMF$vectorsizeinbytes$Z payload;
+#else[!Max]
+        static final long MFOFFSET = VectorPayloadMF.multiFieldOffset(VectorPayloadMF$bits$$Boxbitsinitials$Z.class);
+
+        private final VectorPayloadMF$bits$$Boxbitsinitials$Z payload;
+#end[!Max]
+
+        $masktype$(VectorPayloadMF payload) {
+#if[!Max]
+            this.payload = (VectorPayloadMF$vectorsizeinbytes$Z) payload;
+#else[!Max]
+            this.payload = (VectorPayloadMF$bits$$Boxbitsinitials$Z) payload;
+#end[!Max]
         }
 
-        $masktype$(boolean[] bits, int offset) {
-            super(prepare(bits, offset));
+        $masktype$(VectorPayloadMF payload, int offset) {
+            this(prepare(payload, offset, VSPECIES));
         }
 
         $masktype$(boolean val) {
-            super(prepare(val));
-        }
-
-        private static boolean[] prepare(boolean[] bits, int offset) {
-            boolean[] newBits = new boolean[VSPECIES.laneCount()];
-            for (int i = 0; i < newBits.length; i++) {
-                newBits[i] = bits[offset + i];
-            }
-            return newBits;
-        }
-
-        private static boolean[] prepare(boolean val) {
-            boolean[] bits = new boolean[VSPECIES.laneCount()];
-            Arrays.fill(bits, val);
-            return bits;
+            this(prepare(val, VSPECIES));
         }
 
         @ForceInline
@@ -888,30 +861,14 @@ value class $vectortype$ extends $abstractvectortype$ {
         }
 
         @ForceInline
-        boolean[] getBits() {
-            return (boolean[])getPayload();
+        @Override
+        final VectorPayloadMF getBits() {
+            return payload;
         }
 
+        @ForceInline
         @Override
-        $masktype$ uOp(MUnOp f) {
-            boolean[] res = new boolean[vspecies().laneCount()];
-            boolean[] bits = getBits();
-            for (int i = 0; i < res.length; i++) {
-                res[i] = f.apply(i, bits[i]);
-            }
-            return new $masktype$(res);
-        }
-
-        @Override
-        $masktype$ bOp(VectorMask<$Boxtype$> m, MBinOp f) {
-            boolean[] res = new boolean[vspecies().laneCount()];
-            boolean[] bits = getBits();
-            boolean[] mbits = (($masktype$)m).getBits();
-            for (int i = 0; i < res.length; i++) {
-                res[i] = f.apply(i, bits[i], mbits[i]);
-            }
-            return new $masktype$(res);
-        }
+        public final long multiFieldOffset() { return MFOFFSET; }
 
         @ForceInline
         @Override
@@ -920,39 +877,13 @@ value class $vectortype$ extends $abstractvectortype$ {
             return ($vectortype$) super.toVectorTemplate();  // specialize
         }
 
-        /**
-         * Helper function for lane-wise mask conversions.
-         * This function kicks in after intrinsic failure.
-         */
-        @ForceInline
-        private final <E>
-        VectorMask<E> defaultMaskCast(AbstractSpecies<E> dsp) {
-            if (length() != dsp.laneCount())
-                throw new IllegalArgumentException("VectorMask length and species length differ");
-            boolean[] maskArray = toArray();
-            return  dsp.maskFactory(maskArray).check(dsp);
-        }
-
         @Override
         @ForceInline
-        public <E> VectorMask<E> cast(VectorSpecies<E> dsp) {
-            AbstractSpecies<E> species = (AbstractSpecies<E>) dsp;
-            if (length() != species.laneCount())
-                throw new IllegalArgumentException("VectorMask length and species length differ");
-
-            return VectorSupport.convert(VectorSupport.VECTOR_OP_CAST,
-                this.getClass(), ETYPE, VLENGTH,
-                species.maskType(), species.elementType(), VLENGTH,
-                this, species,
-                (m, s) -> s.maskFactory(m.toArray()).check(s));
-        }
-
-        @Override
-        @ForceInline
-        public $masktype$ eq(VectorMask<$Boxtype$> mask) {
-            Objects.requireNonNull(mask);
-            $masktype$ m = ($masktype$)mask;
-            return xor(m.not());
+        /*package-private*/
+        $masktype$ indexPartiallyInUpperRange(long offset, long limit) {
+            return ($masktype$) VectorSupport.indexPartiallyInUpperRange(
+                $masktype$.class, $type$.class, VLENGTH, offset, limit,
+                (o, l) -> ($masktype$) TRUE_MASK.indexPartiallyInRange(o, l));
         }
 
         // Unary operations
@@ -966,7 +897,7 @@ value class $vectortype$ extends $abstractvectortype$ {
         @Override
         @ForceInline
         public $masktype$ compress() {
-            return ($masktype$)VectorSupport.compressExpandOp(VectorSupport.VECTOR_OP_MASK_COMPRESS,
+            return ($masktype$) VectorSupport.compressExpandOp(VectorSupport.VECTOR_OP_MASK_COMPRESS,
                 $vectortype$.class, $masktype$.class, ETYPE, VLENGTH, null, this,
                 (v1, m1) -> VSPECIES.iota().compare(VectorOperators.LT, m1.trueCount()));
         }
@@ -979,9 +910,9 @@ value class $vectortype$ extends $abstractvectortype$ {
         public $masktype$ and(VectorMask<$Boxtype$> mask) {
             Objects.requireNonNull(mask);
             $masktype$ m = ($masktype$)mask;
-            return VectorSupport.binaryOp(VECTOR_OP_AND, $masktype$.class, null, $bitstype$.class, VLENGTH,
-                                          this, m, null,
-                                          (m1, m2, vm) -> m1.bOp(m2, (i, a, b) -> a & b));
+            return VectorSupport.binaryOp(VECTOR_OP_AND, $masktype$.class, null,
+                                          $bitstype$.class, VLENGTH, this, m, null,
+                                          (m1, m2, vm) -> ($masktype$) m1.bOpMF(m2, (i, a, b) -> a & b));
         }
 
         @Override
@@ -989,19 +920,19 @@ value class $vectortype$ extends $abstractvectortype$ {
         public $masktype$ or(VectorMask<$Boxtype$> mask) {
             Objects.requireNonNull(mask);
             $masktype$ m = ($masktype$)mask;
-            return VectorSupport.binaryOp(VECTOR_OP_OR, $masktype$.class, null, $bitstype$.class, VLENGTH,
-                                          this, m, null,
-                                          (m1, m2, vm) -> m1.bOp(m2, (i, a, b) -> a | b));
+            return VectorSupport.binaryOp(VECTOR_OP_OR, $masktype$.class, null,
+                                          $bitstype$.class, VLENGTH, this, m, null,
+                                          (m1, m2, vm) -> ($masktype$) m1.bOpMF(m2, (i, a, b) -> a | b));
         }
 
+        @Override
         @ForceInline
-        /* package-private */
-        $masktype$ xor(VectorMask<$Boxtype$> mask) {
+        public $masktype$ xor(VectorMask<$Boxtype$> mask) {
             Objects.requireNonNull(mask);
             $masktype$ m = ($masktype$)mask;
-            return VectorSupport.binaryOp(VECTOR_OP_XOR, $masktype$.class, null, $bitstype$.class, VLENGTH,
-                                          this, m, null,
-                                          (m1, m2, vm) -> m1.bOp(m2, (i, a, b) -> a ^ b));
+            return VectorSupport.binaryOp(VECTOR_OP_XOR, $masktype$.class, null,
+                                          $bitstype$.class, VLENGTH, this, m, null,
+                                          (m1, m2, vm) -> ($masktype$) m1.bOpMF(m2, (i, a, b) -> a ^ b));
         }
 
         // Mask Query operations
@@ -1010,21 +941,21 @@ value class $vectortype$ extends $abstractvectortype$ {
         @ForceInline
         public int trueCount() {
             return (int) VectorSupport.maskReductionCoerced(VECTOR_OP_MASK_TRUECOUNT, $masktype$.class, $bitstype$.class, VLENGTH, this,
-                                                      (m) -> trueCountHelper(m.getBits()));
+                                                            (m) -> (($masktype$) m).trueCountHelper());
         }
 
         @Override
         @ForceInline
         public int firstTrue() {
             return (int) VectorSupport.maskReductionCoerced(VECTOR_OP_MASK_FIRSTTRUE, $masktype$.class, $bitstype$.class, VLENGTH, this,
-                                                      (m) -> firstTrueHelper(m.getBits()));
+                                                            (m) -> (($masktype$) m).firstTrueHelper());
         }
 
         @Override
         @ForceInline
         public int lastTrue() {
             return (int) VectorSupport.maskReductionCoerced(VECTOR_OP_MASK_LASTTRUE, $masktype$.class, $bitstype$.class, VLENGTH, this,
-                                                      (m) -> lastTrueHelper(m.getBits()));
+                                                            (m) -> (($masktype$) m).lastTrueHelper());
         }
 
         @Override
@@ -1034,7 +965,7 @@ value class $vectortype$ extends $abstractvectortype$ {
                 throw new UnsupportedOperationException("too many lanes for one long");
             }
             return VectorSupport.maskReductionCoerced(VECTOR_OP_MASK_TOLONG, $masktype$.class, $bitstype$.class, VLENGTH, this,
-                                                      (m) -> toLongHelper(m.getBits()));
+                                                      (m) -> (($masktype$) m).toLongHelper());
         }
 
         // Reductions
@@ -1044,7 +975,7 @@ value class $vectortype$ extends $abstractvectortype$ {
         public boolean anyTrue() {
             return VectorSupport.test(BT_ne, $masktype$.class, $bitstype$.class, VLENGTH,
                                          this, vspecies().maskAll(true),
-                                         (m, __) -> anyTrueHelper((($masktype$)m).getBits()));
+                                         (m, __) -> (($masktype$) m).anyTrueHelper());
         }
 
         @Override
@@ -1052,7 +983,7 @@ value class $vectortype$ extends $abstractvectortype$ {
         public boolean allTrue() {
             return VectorSupport.test(BT_overflow, $masktype$.class, $bitstype$.class, VLENGTH,
                                          this, vspecies().maskAll(true),
-                                         (m, __) -> allTrueHelper((($masktype$)m).getBits()));
+                                         (m, __) -> (($masktype$) m).allTrueHelper());
         }
 
         @ForceInline
@@ -1067,13 +998,16 @@ value class $vectortype$ extends $abstractvectortype$ {
 
 #if[intAndMax]
 
-        static boolean[] maskLowerHalf() {
-            boolean[] a = new boolean[VLENGTH];
-            int len = a.length >> 1;
+        static VectorPayloadMF maskLowerHalf() {
+            VectorPayloadMF newObj = createPayloadInstance(VSPECIES);
+            newObj = Unsafe.getUnsafe().makePrivateBuffer(newObj);
+            long mf_offset = newObj.multiFieldOffset();
+            int len = VLENGTH >> 1;
             for (int i = 0; i < len; i++) {
-                a[i] = true;
+                Unsafe.getUnsafe().putBoolean(newObj, mf_offset + i, true);
             }
-            return a;
+            newObj = Unsafe.getUnsafe().finishPrivateBuffer(newObj);
+            return newObj;
         }
 
 #end[intAndMax]
@@ -1084,27 +1018,34 @@ value class $vectortype$ extends $abstractvectortype$ {
 
     // Shuffle
 
-    static final class $shuffletype$ extends AbstractShuffle<$Boxtype$> {
+    static final value class $shuffletype$ extends AbstractShuffle<$Boxtype$> {
         static final int VLENGTH = VSPECIES.laneCount();    // used by the JVM
-        static final Class<$Boxtype$> ETYPE = $type$.class; // used by the JVM
+        static final Class<$Boxbitstype$> ETYPE = $bitstype$.class; // used by the JVM
 
-        $shuffletype$(byte[] reorder) {
-            super(VLENGTH, reorder);
+        private final VectorPayloadMF$bits$$Boxbitsinitials$ payload;
+
+        $shuffletype$(VectorPayloadMF payload) {
+            this.payload = (VectorPayloadMF$bits$$Boxbitsinitials$) payload;
+            //assert(VLENGTH == payload.length());
+            assert(indicesInRange(payload));
         }
 
-        public $shuffletype$(int[] reorder) {
-            super(VLENGTH, reorder);
+        $shuffletype$(int[] indices, int i) {
+            this(prepare(indices, i));
         }
 
-        public $shuffletype$(int[] reorder, int i) {
-            super(VLENGTH, reorder, i);
+        $shuffletype$(IntUnaryOperator fn) {
+            this(prepare(fn));
         }
 
-        public $shuffletype$(IntUnaryOperator fn) {
-            super(VLENGTH, fn);
+        @ForceInline
+        @Override
+        protected final VectorPayloadMF indices() {
+            return payload;
         }
 
         @Override
+        @ForceInline
         public $Type$Species vspecies() {
             return VSPECIES;
         }
@@ -1112,40 +1053,134 @@ value class $vectortype$ extends $abstractvectortype$ {
         static {
             // There must be enough bits in the shuffle lanes to encode
             // VLENGTH valid indexes and VLENGTH exceptional ones.
-            assert(VLENGTH < Byte.MAX_VALUE);
-            assert(Byte.MIN_VALUE <= -VLENGTH);
+            assert(VLENGTH < $Boxbitstype$.MAX_VALUE);
+            assert($Boxbitstype$.MIN_VALUE <= -VLENGTH);
         }
         static final $shuffletype$ IOTA = new $shuffletype$(IDENTITY);
 
         @Override
         @ForceInline
-        public $vectortype$ toVector() {
-            return VectorSupport.shuffleToVector(VCLASS, ETYPE, $shuffletype$.class, this, VLENGTH,
-                                                    (s) -> (($vectortype$)(((AbstractShuffle<$Boxtype$>)(s)).toVectorTemplate())));
+        $bitsvectortype$ toBitsVector() {
+            return ($bitsvectortype$) super.toBitsVectorTemplate();
         }
 
         @Override
         @ForceInline
-        public <F> VectorShuffle<F> cast(VectorSpecies<F> s) {
-            AbstractSpecies<F> species = (AbstractSpecies<F>) s;
-            if (length() != species.laneCount())
-                throw new IllegalArgumentException("VectorShuffle length and species length differ");
-            int[] shuffleArray = toArray();
-            return s.shuffleFromArray(shuffleArray, 0).check(s);
+        $Bitstype$Vector toBitsVector0() {
+            return $bitsvectortype$.VSPECIES.dummyVectorMF().vectorFactory(indices());
         }
 
-        @ForceInline
         @Override
-        public $shuffletype$ rearrange(VectorShuffle<$Boxtype$> shuffle) {
-            $shuffletype$ s = ($shuffletype$) shuffle;
-            byte[] reorder1 = reorder();
-            byte[] reorder2 = s.reorder();
-            byte[] r = new byte[reorder1.length];
-            for (int i = 0; i < reorder1.length; i++) {
-                int ssi = reorder2[i];
-                r[i] = reorder1[ssi];  // throws on exceptional index
+        @ForceInline
+        public int laneSource(int i) {
+            return (int)toBitsVector().lane(i);
+        }
+
+        @Override
+        @ForceInline
+        public void intoArray(int[] a, int offset) {
+#if[byte]
+            VectorSpecies<Integer> species = IntVector.SPECIES_$BITS$;
+            Vector<Byte> v = toBitsVector();
+            v.convertShape(VectorOperators.B2I, species, 0)
+                    .reinterpretAsInts()
+                    .intoArray(a, offset);
+            v.convertShape(VectorOperators.B2I, species, 1)
+                    .reinterpretAsInts()
+                    .intoArray(a, offset + species.length());
+            v.convertShape(VectorOperators.B2I, species, 2)
+                    .reinterpretAsInts()
+                    .intoArray(a, offset + species.length() * 2);
+            v.convertShape(VectorOperators.B2I, species, 3)
+                    .reinterpretAsInts()
+                    .intoArray(a, offset + species.length() * 3);
+#end[byte]
+#if[short]
+            VectorSpecies<Integer> species = IntVector.SPECIES_$BITS$;
+            Vector<Short> v = toBitsVector();
+            v.convertShape(VectorOperators.S2I, species, 0)
+                    .reinterpretAsInts()
+                    .intoArray(a, offset);
+            v.convertShape(VectorOperators.S2I, species, 1)
+                    .reinterpretAsInts()
+                    .intoArray(a, offset + species.length());
+#end[short]
+#if[intOrFloat]
+            toBitsVector().intoArray(a, offset);
+#end[intOrFloat]
+#if[longOrDouble]
+            switch (length()) {
+                case 1 -> a[offset] = laneSource(0);
+                case 2 -> toBitsVector()
+                        .convertShape(VectorOperators.L2I, IntVector.SPECIES_64, 0)
+                        .reinterpretAsInts()
+                        .intoArray(a, offset);
+                case 4 -> toBitsVector()
+                        .convertShape(VectorOperators.L2I, IntVector.SPECIES_128, 0)
+                        .reinterpretAsInts()
+                        .intoArray(a, offset);
+                case 8 -> toBitsVector()
+                        .convertShape(VectorOperators.L2I, IntVector.SPECIES_256, 0)
+                        .reinterpretAsInts()
+                        .intoArray(a, offset);
+                case 16 -> toBitsVector()
+                        .convertShape(VectorOperators.L2I, IntVector.SPECIES_512, 0)
+                        .reinterpretAsInts()
+                        .intoArray(a, offset);
+                default -> {
+                    VectorIntrinsics.checkFromIndexSize(offset, length(), a.length);
+                    for (int i = 0; i < length(); i++) {
+                        a[offset + i] = laneSource(i);
+                    }
+                }
             }
-            return new $shuffletype$(r);
+#end[longOrDouble]
+        }
+
+        private static VectorPayloadMF prepare(int[] indices, int offset) {
+            VectorPayloadMF payload = createPayloadInstance(VSPECIES);
+            payload = Unsafe.getUnsafe().makePrivateBuffer(payload);
+            long mfOffset = payload.multiFieldOffset();
+            for (int i = 0; i < VLENGTH; i++) {
+                int si = indices[offset + i];
+                si = partiallyWrapIndex(si, VLENGTH);
+                Unsafe.getUnsafe().put$Bitstype$(payload, mfOffset + i * $Boxbitstype$.BYTES, ($bitstype$) si);
+            }
+            payload = Unsafe.getUnsafe().finishPrivateBuffer(payload);
+            return payload;
+        }
+
+        private static VectorPayloadMF prepare(IntUnaryOperator f) {
+            VectorPayloadMF payload = createPayloadInstance(VSPECIES);
+            payload = Unsafe.getUnsafe().makePrivateBuffer(payload);
+            long offset = payload.multiFieldOffset();
+            for (int i = 0; i < VLENGTH; i++) {
+                int si = f.applyAsInt(i);
+                si = partiallyWrapIndex(si, VLENGTH);
+                Unsafe.getUnsafe().put$Bitstype$(payload, offset + i * $Boxbitstype$.BYTES, ($bitstype$) si);
+            }
+            payload = Unsafe.getUnsafe().finishPrivateBuffer(payload);
+            return payload;
+        }
+
+
+        private static boolean indicesInRange(VectorPayloadMF indices) {
+            int length = VLENGTH;
+            long offset = indices.multiFieldOffset();
+            for (int i = 0; i < length; i++) {
+                $bitstype$ si = Unsafe.getUnsafe().get$Bitstype$(indices, offset + i * $Boxbitstype$.BYTES);
+                if (si >= length || si < -length) {
+                    boolean assertsEnabled = false;
+                    assert(assertsEnabled = true);
+                    if (assertsEnabled) {
+                        String msg = ("index "+si+"out of range ["+length+"] in "+
+                                indices.toString());
+                        throw new AssertionError(msg);
+                    }
+                    return false;
+                }
+            }
+            return true;
         }
     }
 

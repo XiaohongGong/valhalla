@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2020, 2023, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -58,6 +58,7 @@ do
   Type="$(tr '[:lower:]' '[:upper:]' <<< ${type:0:1})${type:1}"
   TYPE="$(tr '[:lower:]' '[:upper:]' <<< ${type})"
   Boxinitials="$(tr '[:lower:]' '[:upper:]' <<< ${type:0:1})"
+  Boxbitsinitials=$Boxinitials
   args=$globalArgs
   args="$args -K$type -Dtype=$type -DType=$Type -DTYPE=$TYPE"
 
@@ -107,6 +108,7 @@ do
       bitstype=int
       Bitstype=Int
       Boxbitstype=Integer
+      Boxbitsinitials=I
       sizeInBytes=4
       args="$args -KintOrFP -KintOrFloat"
       ;;
@@ -115,12 +117,13 @@ do
       bitstype=long
       Bitstype=Long
       Boxbitstype=Long
+      Boxbitsinitials=L
       sizeInBytes=8
       args="$args -KintOrFP -KlongOrDouble"
       ;;
   esac
 
-  args="$args -K$kind -DBoxtype=$Boxtype -DBoxinitials=$Boxinitials -DWideboxtype=$Wideboxtype"
+  args="$args -K$kind -DBoxtype=$Boxtype -DBoxinitials=$Boxinitials -DBoxbitsinitials=$Boxbitsinitials -DWideboxtype=$Wideboxtype"
   args="$args -Dbitstype=$bitstype -DBitstype=$Bitstype -DBoxbitstype=$Boxbitstype"
   args="$args -Dfptype=$fptype -DFptype=$Fptype -DBoxfptype=$Boxfptype"
   args="$args -DsizeInBytes=$sizeInBytes"
@@ -145,8 +148,8 @@ do
   esac
 
   old_args="$args"
-  # for bits in 64 128 256 512 Max
-  for bits in 64 128 256 512
+  for bits in 64 128 256 512 Max
+  #for bits in 64 128 256 512
   do
     vectortype=${typeprefix}${Type}${bits}Vector
     masktype=${typeprefix}${Type}${bits}Mask
@@ -154,6 +157,7 @@ do
     bitsvectortype=${typeprefix}${Bitstype}${bits}Vector
     fpvectortype=${typeprefix}${Fptype}${bits}Vector
     vectorindexbits=$((bits * 4 / sizeInBytes))
+    vectorsizeinbytes=$((bits / sizeInBytes))
 
     numLanes=$((bits / (sizeInBytes * 8)))
     if [[ "${numLanes}" == "1" ]]; then
@@ -192,7 +196,7 @@ do
     if [[ "${vectortype}" == "IntMaxVector" ]]; then
       args="$args -KintAndMax"
     fi
-    bitargs="$args -Dbits=$bits -DBITS=$BITS -Dvectortype=$vectortype -DnumLanes=$numLanes  -Dmasktype=$masktype -Dshuffletype=$shuffletype -Dbitsvectortype=$bitsvectortype -Dfpvectortype=$fpvectortype -Dvectorindextype=$vectorindextype -Dshape=$shape -DShape=$Shape"
+    bitargs="$args -Dbits=$bits -DBITS=$BITS -Dvectortype=$vectortype -DnumLanes=$numLanes  -Dmasktype=$masktype -Dshuffletype=$shuffletype -Dbitsvectortype=$bitsvectortype -Dfpvectortype=$fpvectortype -Dvectorindextype=$vectorindextype -Dshape=$shape -DShape=$Shape -Dvectorsizeinbytes=$vectorsizeinbytes"
 
     case $vectortype in
     $CLASS_FILTER)

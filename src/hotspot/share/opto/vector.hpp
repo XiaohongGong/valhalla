@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,7 @@
 #ifndef SHARE_OPTO_VECTOR_HPP
 #define SHARE_OPTO_VECTOR_HPP
 
+#include "ci/ciKlass.hpp"
 #include "opto/node.hpp"
 #include "opto/phaseX.hpp"
 #include "opto/type.hpp"
@@ -36,14 +37,17 @@ class PhaseVector : public Phase {
 
   void expand_vbox_nodes();
   void expand_vbox_node(VectorBoxNode* vec_box);
-  Node* expand_vbox_node_helper(Node* vbox,
+  Node* expand_vbox_node_helper(Node* vbox_alloc,
                                 Node* vect,
                                 const TypeInstPtr* box_type,
-                                const TypeVect* vect_type);
+                                const TypeVect* vect_type,
+                                VectorSet &visited);
+
   Node* expand_vbox_alloc_node(VectorBoxAllocateNode* vbox_alloc,
-                               Node* value,
+                               Node* vect,
                                const TypeInstPtr* box_type,
                                const TypeVect* vect_type);
+
   void scalarize_vbox_nodes();
   void scalarize_vbox_node(VectorBoxNode* vec_box);
   void expand_vunbox_nodes();

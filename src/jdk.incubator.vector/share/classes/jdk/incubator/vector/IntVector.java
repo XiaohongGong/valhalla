@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -57,7 +57,7 @@ public abstract class IntVector extends AbstractVector<Integer> {
      */
     public IntVector() {}
 
-    static final ValueLayout.OfInt ELEMENT_LAYOUT = ValueLayout.JAVA_INT.withBitAlignment(8);
+    static final ValueLayout.OfInt ELEMENT_LAYOUT = ValueLayout.JAVA_INT.withByteAlignment(1);
 
     @ForceInline
     static int opCode(Operator op) {
@@ -93,20 +93,13 @@ public abstract class IntVector extends AbstractVector<Integer> {
 
     // Virtualized getter
 
-    /*package-private*/
-    abstract int[] vec();
-
-    abstract VectorPayloadMF vec_mf();
-
     // Virtualized constructors
 
     /**
      * Build a vector directly using my own constructor.
-     * It is an error if the array is aliased elsewhere.
+     * It is an error if the vec is aliased elsewhere.
      */
     /*package-private*/
-    abstract IntVector vectorFactory(int[] vec);
-
     abstract IntVector vectorFactory(VectorPayloadMF vec);
 
     /**
@@ -116,8 +109,8 @@ public abstract class IntVector extends AbstractVector<Integer> {
     /*package-private*/
     @ForceInline
     final
-    AbstractMask<Integer> maskFactory(boolean[] bits) {
-        return vspecies().maskFactory(bits);
+    AbstractMask<Integer> maskFactory(VectorPayloadMF payload) {
+        return vspecies().maskFactory(payload);
     }
 
     // Constant loader (takes dummy as vector arg)
@@ -141,9 +134,10 @@ public abstract class IntVector extends AbstractVector<Integer> {
     final
     IntVector vOpMF(VectorMask<Integer> m, FVOp f) {
         int[] res = new int[length()];
-        boolean[] mbits = ((AbstractMask<Integer>)m).getBits();
+        VectorPayloadMF mbits = ((AbstractMask<Integer>)m).getBits();
+        long mOffset = mbits.multiFieldOffset();
         for (int i = 0; i < res.length; i++) {
-            if (mbits[i]) {
+            if (Unsafe.getUnsafe().getBoolean(mbits, mOffset + i)) {
                 res[i] = f.apply(i);
             }
         }
@@ -164,13 +158,13 @@ public abstract class IntVector extends AbstractVector<Integer> {
     @ForceInline
     final
     IntVector uOpTemplateMF(FUnOp f) {
-        VectorPayloadMF vec = this.vec_mf();
+        VectorPayloadMF vec = this.vec();
         VectorPayloadMF tpayload = Unsafe.getUnsafe().makePrivateBuffer(vec);
-        long start_offset = this.multiFieldOffset();
+        long vOffset = this.multiFieldOffset();
         int length = vspecies().length();
         for (int i = 0; i < length; i++) {
-            int v = Unsafe.getUnsafe().getInt(vec, start_offset + i * Integer.BYTES);
-            Unsafe.getUnsafe().putInt(tpayload, start_offset + i * Integer.BYTES, f.apply(i, v));
+            int v = Unsafe.getUnsafe().getInt(vec, vOffset + i * Integer.BYTES);
+            Unsafe.getUnsafe().putInt(tpayload, vOffset + i * Integer.BYTES, f.apply(i, v));
         }
         tpayload = Unsafe.getUnsafe().finishPrivateBuffer(tpayload);
         return vectorFactory(tpayload);
@@ -187,14 +181,16 @@ public abstract class IntVector extends AbstractVector<Integer> {
         if (m == null) {
             return uOpTemplateMF(f);
         }
-        boolean[] mbits = ((AbstractMask<Integer>)m).getBits();
-        VectorPayloadMF vec = this.vec_mf();
+        VectorPayloadMF mbits = ((AbstractMask<Integer>)m).getBits();
+        VectorPayloadMF vec = this.vec();
         VectorPayloadMF tpayload = Unsafe.getUnsafe().makePrivateBuffer(vec);
-        long start_offset = this.multiFieldOffset();
+        long vOffset = this.multiFieldOffset();
+        long mOffset = mbits.multiFieldOffset();
         int length = vspecies().length();
         for (int i = 0; i < length; i++) {
-            int v = Unsafe.getUnsafe().getInt(vec, start_offset + i * Integer.BYTES);
-            Unsafe.getUnsafe().putInt(tpayload, start_offset + i * Integer.BYTES, mbits[i] ? f.apply(i, v): v);
+            int v = Unsafe.getUnsafe().getInt(vec, vOffset + i * Integer.BYTES);
+            v = Unsafe.getUnsafe().getBoolean(mbits, mOffset + i) ? f.apply(i, v) : v;
+            Unsafe.getUnsafe().putInt(tpayload, vOffset + i * Integer.BYTES, v);
         }
         tpayload = Unsafe.getUnsafe().finishPrivateBuffer(tpayload);
         return vectorFactory(tpayload);
@@ -215,15 +211,15 @@ public abstract class IntVector extends AbstractVector<Integer> {
     final
     IntVector bOpTemplateMF(Vector<Integer> o,
                                      FBinOp f) {
-        VectorPayloadMF vec1 = this.vec_mf();
-        VectorPayloadMF vec2 = ((IntVector)o).vec_mf();
+        VectorPayloadMF vec1 = vec();
+        VectorPayloadMF vec2 = ((IntVector)o).vec();
         VectorPayloadMF tpayload = Unsafe.getUnsafe().makePrivateBuffer(vec1);
-        long start_offset = this.multiFieldOffset();
+        long vOffset = this.multiFieldOffset();
         int length = vspecies().length();
         for (int i = 0; i < length; i++) {
-            int v1 = Unsafe.getUnsafe().getInt(vec1, start_offset + i * Integer.BYTES);
-            int v2 = Unsafe.getUnsafe().getInt(vec2, start_offset + i * Integer.BYTES);
-            Unsafe.getUnsafe().putInt(tpayload, start_offset + i * Integer.BYTES, f.apply(i, v1, v2));
+            int v1 = Unsafe.getUnsafe().getInt(vec1, vOffset + i * Integer.BYTES);
+            int v2 = Unsafe.getUnsafe().getInt(vec2, vOffset + i * Integer.BYTES);
+            Unsafe.getUnsafe().putInt(tpayload, vOffset + i * Integer.BYTES, f.apply(i, v1, v2));
         }
         tpayload = Unsafe.getUnsafe().finishPrivateBuffer(tpayload);
         return vectorFactory(tpayload);
@@ -242,16 +238,18 @@ public abstract class IntVector extends AbstractVector<Integer> {
         if (m == null) {
             return bOpTemplateMF(o, f);
         }
-        boolean[] mbits = ((AbstractMask<Integer>)m).getBits();
-        VectorPayloadMF vec1 = this.vec_mf();
-        VectorPayloadMF vec2 = ((IntVector)o).vec_mf();
+        VectorPayloadMF mbits = ((AbstractMask<Integer>)m).getBits();
+        VectorPayloadMF vec1 = this.vec();
+        VectorPayloadMF vec2 = ((IntVector)o).vec();
         VectorPayloadMF tpayload = Unsafe.getUnsafe().makePrivateBuffer(vec1);
-        long start_offset = this.multiFieldOffset();
+        long vOffset = this.multiFieldOffset();
+        long mOffset = mbits.multiFieldOffset();
         int length = vspecies().length();
         for (int i = 0; i < length; i++) {
-            int v1 = Unsafe.getUnsafe().getInt(vec1, start_offset + i * Integer.BYTES);
-            int v2 = Unsafe.getUnsafe().getInt(vec2, start_offset + i * Integer.BYTES);
-            Unsafe.getUnsafe().putInt(tpayload, start_offset + i * Integer.BYTES, mbits[i] ? f.apply(i, v1, v2): v1);
+            int v1 = Unsafe.getUnsafe().getInt(vec1, vOffset + i * Integer.BYTES);
+            int v2 = Unsafe.getUnsafe().getInt(vec2, vOffset + i * Integer.BYTES);
+            int v = Unsafe.getUnsafe().getBoolean(mbits, mOffset + i) ? f.apply(i, v1, v2) : v1;
+            Unsafe.getUnsafe().putInt(tpayload, vOffset + i * Integer.BYTES, v);
         }
         tpayload = Unsafe.getUnsafe().finishPrivateBuffer(tpayload);
         return vectorFactory(tpayload);
@@ -274,17 +272,17 @@ public abstract class IntVector extends AbstractVector<Integer> {
     IntVector tOpTemplateMF(Vector<Integer> o1,
                                      Vector<Integer> o2,
                                      FTriOp f) {
-        VectorPayloadMF vec1 = this.vec_mf();
-        VectorPayloadMF vec2 = ((IntVector)o1).vec_mf();
-        VectorPayloadMF vec3 = ((IntVector)o2).vec_mf();
+        VectorPayloadMF vec1 = this.vec();
+        VectorPayloadMF vec2 = ((IntVector)o1).vec();
+        VectorPayloadMF vec3 = ((IntVector)o2).vec();
         VectorPayloadMF tpayload = Unsafe.getUnsafe().makePrivateBuffer(vec1);
-        long start_offset = this.multiFieldOffset();
+        long vOffset = this.multiFieldOffset();
         int length = vspecies().length();
         for (int i = 0; i < length; i++) {
-            int v1 = Unsafe.getUnsafe().getInt(vec1, start_offset + i * Integer.BYTES);
-            int v2 = Unsafe.getUnsafe().getInt(vec2, start_offset + i * Integer.BYTES);
-            int v3 = Unsafe.getUnsafe().getInt(vec3, start_offset + i * Integer.BYTES);
-            Unsafe.getUnsafe().putInt(tpayload, start_offset + i * Integer.BYTES, f.apply(i, v1, v2, v3));
+            int v1 = Unsafe.getUnsafe().getInt(vec1, vOffset + i * Integer.BYTES);
+            int v2 = Unsafe.getUnsafe().getInt(vec2, vOffset + i * Integer.BYTES);
+            int v3 = Unsafe.getUnsafe().getInt(vec3, vOffset + i * Integer.BYTES);
+            Unsafe.getUnsafe().putInt(tpayload, vOffset + i * Integer.BYTES, f.apply(i, v1, v2, v3));
         }
         tpayload = Unsafe.getUnsafe().finishPrivateBuffer(tpayload);
         return vectorFactory(tpayload);
@@ -305,18 +303,20 @@ public abstract class IntVector extends AbstractVector<Integer> {
         if (m == null) {
             return tOpTemplateMF(o1, o2, f);
         }
-        boolean[] mbits = ((AbstractMask<Integer>)m).getBits();
-        VectorPayloadMF vec1 = this.vec_mf();
-        VectorPayloadMF vec2 = ((IntVector)o1).vec_mf();
-        VectorPayloadMF vec3 = ((IntVector)o2).vec_mf();
+        VectorPayloadMF mbits = ((AbstractMask<Integer>)m).getBits();
+        VectorPayloadMF vec1 = this.vec();
+        VectorPayloadMF vec2 = ((IntVector)o1).vec();
+        VectorPayloadMF vec3 = ((IntVector)o2).vec();
         VectorPayloadMF tpayload = Unsafe.getUnsafe().makePrivateBuffer(vec1);
-        long start_offset = this.multiFieldOffset();
+        long vOffset = this.multiFieldOffset();
+        long mOffset = mbits.multiFieldOffset();
         int length = vspecies().length();
         for (int i = 0; i < length; i++) {
-            int v1 = Unsafe.getUnsafe().getInt(vec1, start_offset + i * Integer.BYTES);
-            int v2 = Unsafe.getUnsafe().getInt(vec2, start_offset + i * Integer.BYTES);
-            int v3 = Unsafe.getUnsafe().getInt(vec3, start_offset + i * Integer.BYTES);
-            Unsafe.getUnsafe().putInt(tpayload, start_offset + i * Integer.BYTES, mbits[i] ? f.apply(i, v1, v2, v3): v1);
+            int v1 = Unsafe.getUnsafe().getInt(vec1, vOffset + i * Integer.BYTES);
+            int v2 = Unsafe.getUnsafe().getInt(vec2, vOffset + i * Integer.BYTES);
+            int v3 = Unsafe.getUnsafe().getInt(vec3, vOffset + i * Integer.BYTES);
+            int v = Unsafe.getUnsafe().getBoolean(mbits, mOffset + i) ? f.apply(i, v1, v2, v3) : v1;
+            Unsafe.getUnsafe().putInt(tpayload, vOffset + i * Integer.BYTES, v);
         }
         tpayload = Unsafe.getUnsafe().finishPrivateBuffer(tpayload);
         return vectorFactory(tpayload);
@@ -334,13 +334,14 @@ public abstract class IntVector extends AbstractVector<Integer> {
         if (m == null) {
             return rOpTemplateMF(v, f);
         }
-        VectorPayloadMF vec = this.vec_mf();
-        boolean[] mbits = ((AbstractMask<Integer>)m).getBits();
-        long start_offset = this.multiFieldOffset();
+        VectorPayloadMF vec = this.vec();
+        VectorPayloadMF mbits = ((AbstractMask<Integer>)m).getBits();
+        long vOffset = this.multiFieldOffset();
+        long mOffset = mbits.multiFieldOffset();
         int length = vspecies().length();
         for (int i = 0; i < length; i++) {
-            int v1 = Unsafe.getUnsafe().getInt(vec, start_offset + i * Integer.BYTES);
-            v = mbits[i] ? f.apply(i, v, v1) : v;
+            int v1 = Unsafe.getUnsafe().getInt(vec, vOffset + i * Integer.BYTES);
+            v = Unsafe.getUnsafe().getBoolean(mbits, mOffset + i) ? f.apply(i, v, v1) : v;
         }
         return v;
     }
@@ -348,11 +349,11 @@ public abstract class IntVector extends AbstractVector<Integer> {
     @ForceInline
     final
     int rOpTemplateMF(int v, FBinOp f) {
-        VectorPayloadMF vec = this.vec_mf();
-        long start_offset = this.multiFieldOffset();
+        VectorPayloadMF vec = vec();
+        long vOffset = this.multiFieldOffset();
         int length = vspecies().length();
         for (int i = 0; i < length; i++) {
-            int v1 = Unsafe.getUnsafe().getInt(vec, start_offset + i * Integer.BYTES);
+            int v1 = Unsafe.getUnsafe().getInt(vec, vOffset + i * Integer.BYTES);
             v = f.apply(i, v, v1);
         }
         return v;
@@ -372,11 +373,10 @@ public abstract class IntVector extends AbstractVector<Integer> {
                                   FLdOp<M> f) {
         int length = vspecies().length();
         VectorPayloadMF tpayload =
-            Unsafe.getUnsafe().makePrivateBuffer(VectorPayloadMF.createVectPayloadInstance(
-                Integer.BYTES, length));
-        long start_offset = this.multiFieldOffset();
+            Unsafe.getUnsafe().makePrivateBuffer(createPayloadInstance(vspecies()));
+        long vOffset = this.multiFieldOffset();
         for (int i = 0; i < length; i++) {
-            Unsafe.getUnsafe().putInt(tpayload, start_offset + i * Integer.BYTES, f.apply(memory, offset, i));
+            Unsafe.getUnsafe().putInt(tpayload, vOffset + i * Integer.BYTES, f.apply(memory, offset, i));
         }
         tpayload = Unsafe.getUnsafe().finishPrivateBuffer(tpayload);
         return vectorFactory(tpayload);
@@ -390,13 +390,13 @@ public abstract class IntVector extends AbstractVector<Integer> {
                                   FLdOp<M> f) {
         int length = vspecies().length();
         VectorPayloadMF tpayload =
-            Unsafe.getUnsafe().makePrivateBuffer(VectorPayloadMF.createVectPayloadInstance(
-                Integer.BYTES, length));
-        long start_offset = this.multiFieldOffset();
-        boolean[] mbits = ((AbstractMask<Integer>)m).getBits();
+            Unsafe.getUnsafe().makePrivateBuffer(createPayloadInstance(vspecies()));
+        VectorPayloadMF mbits = ((AbstractMask<Integer>)m).getBits();
+        long vOffset = this.multiFieldOffset();
+        long mOffset = mbits.multiFieldOffset();
         for (int i = 0; i < length; i++) {
-            if (mbits[i]) {
-                Unsafe.getUnsafe().putInt(tpayload, start_offset + i * Integer.BYTES, f.apply(memory, offset, i));
+            if (Unsafe.getUnsafe().getBoolean(mbits, mOffset + i)) {
+                Unsafe.getUnsafe().putInt(tpayload, vOffset + i * Integer.BYTES, f.apply(memory, offset, i));
             }
         }
         tpayload = Unsafe.getUnsafe().finishPrivateBuffer(tpayload);
@@ -416,11 +416,10 @@ public abstract class IntVector extends AbstractVector<Integer> {
                                   FLdLongOp f) {
         int length = vspecies().length();
         VectorPayloadMF tpayload =
-            Unsafe.getUnsafe().makePrivateBuffer(VectorPayloadMF.createVectPayloadInstance(
-                Integer.BYTES, length));
-        long start_offset = this.multiFieldOffset();
+            Unsafe.getUnsafe().makePrivateBuffer(createPayloadInstance(vspecies()));
+        long vOffset = this.multiFieldOffset();
         for (int i = 0; i < length; i++) {
-            Unsafe.getUnsafe().putInt(tpayload, start_offset + i * Integer.BYTES, f.apply(memory, offset, i));
+            Unsafe.getUnsafe().putInt(tpayload, vOffset + i * Integer.BYTES, f.apply(memory, offset, i));
         }
         tpayload = Unsafe.getUnsafe().finishPrivateBuffer(tpayload);
         return vectorFactory(tpayload);
@@ -434,13 +433,13 @@ public abstract class IntVector extends AbstractVector<Integer> {
                                   FLdLongOp f) {
         int length = vspecies().length();
         VectorPayloadMF tpayload =
-            Unsafe.getUnsafe().makePrivateBuffer(VectorPayloadMF.createVectPayloadInstance(
-                Integer.BYTES, length));
-        long start_offset = this.multiFieldOffset();
-        boolean[] mbits = ((AbstractMask<Integer>)m).getBits();
+            Unsafe.getUnsafe().makePrivateBuffer(createPayloadInstance(vspecies()));
+        VectorPayloadMF mbits = ((AbstractMask<Integer>)m).getBits();
+        long vOffset = this.multiFieldOffset();
+        long mOffset = mbits.multiFieldOffset();
         for (int i = 0; i < length; i++) {
-            if (mbits[i]) {
-                Unsafe.getUnsafe().putInt(tpayload, start_offset + i * Integer.BYTES, f.apply(memory, offset, i));
+            if (Unsafe.getUnsafe().getBoolean(mbits, mOffset + i)) {
+                Unsafe.getUnsafe().putInt(tpayload, vOffset + i * Integer.BYTES, f.apply(memory, offset, i));
             }
         }
         tpayload = Unsafe.getUnsafe().finishPrivateBuffer(tpayload);
@@ -460,11 +459,11 @@ public abstract class IntVector extends AbstractVector<Integer> {
     final
     <M> void stOpMF(M memory, int offset,
                   FStOp<M> f) {
-        VectorPayloadMF vec = vec_mf();
-        long start_offset = this.multiFieldOffset();
+        VectorPayloadMF vec = vec();
+        long vOffset = this.multiFieldOffset();
         int length = vspecies().length();
         for (int i = 0; i < length; i++) {
-            f.apply(memory, offset, i, Unsafe.getUnsafe().getInt(vec, start_offset + i * Integer.BYTES));
+            f.apply(memory, offset, i, Unsafe.getUnsafe().getInt(vec, vOffset + i * Integer.BYTES));
         }
     }
 
@@ -474,13 +473,14 @@ public abstract class IntVector extends AbstractVector<Integer> {
     <M> void stOpMF(M memory, int offset,
                   VectorMask<Integer> m,
                   FStOp<M> f) {
-        VectorPayloadMF vec = vec_mf();
-        boolean[] mbits = ((AbstractMask<Integer>)m).getBits();
-        long start_offset = this.multiFieldOffset();
+        VectorPayloadMF vec = vec();
+        VectorPayloadMF mbits = ((AbstractMask<Integer>)m).getBits();
+        long vOffset = this.multiFieldOffset();
+        long mOffset = mbits.multiFieldOffset();
         int length = vspecies().length();
         for (int i = 0; i < length; i++) {
-            if (mbits[i]) {
-                f.apply(memory, offset, i, Unsafe.getUnsafe().getInt(vec, start_offset + i * Integer.BYTES));
+            if (Unsafe.getUnsafe().getBoolean(mbits, mOffset + i)) {
+                f.apply(memory, offset, i, Unsafe.getUnsafe().getInt(vec, vOffset + i * Integer.BYTES));
             }
         }
     }
@@ -495,11 +495,11 @@ public abstract class IntVector extends AbstractVector<Integer> {
     final
     void stLongOpMF(MemorySegment memory, long offset,
                   FStLongOp f) {
-        VectorPayloadMF vec = vec_mf();
-        long start_offset = this.multiFieldOffset();
+        VectorPayloadMF vec = vec();
+        long vOffset = this.multiFieldOffset();
         int length = vspecies().length();
         for (int i = 0; i < length; i++) {
-            f.apply(memory, offset, i, Unsafe.getUnsafe().getInt(vec, start_offset + i * Integer.BYTES));
+            f.apply(memory, offset, i, Unsafe.getUnsafe().getInt(vec, vOffset + i * Integer.BYTES));
         }
     }
 
@@ -509,13 +509,14 @@ public abstract class IntVector extends AbstractVector<Integer> {
     void stLongOpMF(MemorySegment memory, long offset,
                   VectorMask<Integer> m,
                   FStLongOp f) {
-        VectorPayloadMF vec = vec_mf();
-        boolean[] mbits = ((AbstractMask<Integer>)m).getBits();
-        long start_offset = this.multiFieldOffset();
+        VectorPayloadMF vec = vec();
+        VectorPayloadMF mbits = ((AbstractMask<Integer>)m).getBits();
+        long vOffset = this.multiFieldOffset();
+        long mOffset = mbits.multiFieldOffset();
         int length = vspecies().length();
         for (int i = 0; i < length; i++) {
-            if (mbits[i]) {
-                f.apply(memory, offset, i, Unsafe.getUnsafe().getInt(vec, start_offset + i * Integer.BYTES));
+            if (Unsafe.getUnsafe().getBoolean(mbits, mOffset + i)) {
+                f.apply(memory, offset, i, Unsafe.getUnsafe().getInt(vec, vOffset + i * Integer.BYTES));
             }
         }
     }
@@ -537,17 +538,20 @@ public abstract class IntVector extends AbstractVector<Integer> {
     AbstractMask<Integer> bTestMF(int cond,
                                   Vector<Integer> o,
                                   FBinTest f) {
-        VectorPayloadMF vec1 = this.vec_mf();
-        VectorPayloadMF vec2 = ((IntVector)o).vec_mf();
         int length = vspecies().length();
-        long start_offset = this.multiFieldOffset();
-        boolean[] bits = new boolean[length];
+        VectorPayloadMF vec1 = vec();
+        VectorPayloadMF vec2 = ((IntVector)o).vec();
+        VectorPayloadMF mbits = AbstractMask.createPayloadInstance(vspecies());
+        mbits = Unsafe.getUnsafe().makePrivateBuffer(mbits);
+        long vOffset = this.multiFieldOffset();
+        long mOffset = mbits.multiFieldOffset();
         for (int i = 0; i < length; i++) {
-            int v1 = Unsafe.getUnsafe().getInt(vec1, start_offset + i * Integer.BYTES);
-            int v2 = Unsafe.getUnsafe().getInt(vec2, start_offset + i * Integer.BYTES);
-            bits[i] = f.apply(cond, i, v1, v2);
+            int v1 = Unsafe.getUnsafe().getInt(vec1, vOffset + i * Integer.BYTES);
+            int v2 = Unsafe.getUnsafe().getInt(vec2, vOffset + i * Integer.BYTES);
+            Unsafe.getUnsafe().putBoolean(mbits, mOffset + i, f.apply(cond, i, v1, v2));
         }
-        return maskFactory(bits);
+        mbits = Unsafe.getUnsafe().finishPrivateBuffer(mbits);
+        return maskFactory(mbits);
     }
 
     /*package-private*/
@@ -1185,7 +1189,7 @@ public abstract class IntVector extends AbstractVector<Integer> {
     // and broadcast, but it would be more surprising not to continue
     // the obvious pattern started by unary and binary.
 
-   /**
+    /**
      * {@inheritDoc} <!--workaround-->
      * @see #lanewise(VectorOperators.Ternary,int,int,VectorMask)
      * @see #lanewise(VectorOperators.Ternary,Vector,int,VectorMask)
@@ -2576,26 +2580,14 @@ public abstract class IntVector extends AbstractVector<Integer> {
     }
 
     @ForceInline
-    private final
-    VectorShuffle<Integer> toShuffle0(IntSpecies dsp) {
+    final <F>
+    VectorShuffle<F> toShuffle0(AbstractSpecies<F> dsp) {
         int[] a = toArray();
         int[] sa = new int[a.length];
         for (int i = 0; i < a.length; i++) {
             sa[i] = (int) a[i];
         }
         return VectorShuffle.fromArray(dsp, sa, 0);
-    }
-
-    /*package-private*/
-    @ForceInline
-    final
-    VectorShuffle<Integer> toShuffleTemplate(Class<?> shuffleType) {
-        IntSpecies vsp = vspecies();
-        return VectorSupport.convert(VectorSupport.VECTOR_OP_CAST,
-                                     getClass(), int.class, length(),
-                                     shuffleType, byte.class, length(),
-                                     this, vsp,
-                                     IntVector::toShuffle0);
     }
 
     /**
@@ -3094,11 +3086,11 @@ public abstract class IntVector extends AbstractVector<Integer> {
                                    VectorMask<Integer> m) {
         IntSpecies vsp = (IntSpecies) species;
         if (VectorIntrinsics.indexInRange(offset, vsp.length(), a.length)) {
-            return vsp.dummyVector().fromArray0(a, offset, m, OFFSET_IN_RANGE);
+            return vsp.dummyVectorMF().fromArray0(a, offset, m, OFFSET_IN_RANGE);
         }
 
         checkMaskFromIndexSize(offset, vsp, m, 1, a.length);
-        return vsp.dummyVector().fromArray0(a, offset, m, OFFSET_OUT_OF_RANGE);
+        return vsp.dummyVectorMF().fromArray0(a, offset, m, OFFSET_OUT_OF_RANGE);
     }
 
     /**
@@ -3206,7 +3198,7 @@ public abstract class IntVector extends AbstractVector<Integer> {
         }
         else {
             IntSpecies vsp = (IntSpecies) species;
-            return vsp.dummyVector().fromArray0(a, offset, indexMap, mapOffset, m);
+            return vsp.dummyVectorMF().fromArray0(a, offset, indexMap, mapOffset, m);
         }
     }
 
@@ -3250,7 +3242,7 @@ public abstract class IntVector extends AbstractVector<Integer> {
                                            ByteOrder bo) {
         offset = checkFromIndexSize(offset, species.vectorByteSize(), ms.byteSize());
         IntSpecies vsp = (IntSpecies) species;
-        return vsp.dummyVector().fromMemorySegment0(ms, offset).maybeSwap(bo);
+        return vsp.dummyVectorMF().fromMemorySegment0(ms, offset).maybeSwap(bo);
     }
 
     /**
@@ -3270,7 +3262,7 @@ public abstract class IntVector extends AbstractVector<Integer> {
      * int[] ar = new int[species.length()];
      * for (int n = 0; n < ar.length; n++) {
      *     if (m.laneIsSet(n)) {
-     *         ar[n] = slice.getAtIndex(ValuaLayout.JAVA_INT.withBitAlignment(8), n);
+     *         ar[n] = slice.getAtIndex(ValuaLayout.JAVA_INT.withByteAlignment(1), n);
      *     }
      * }
      * IntVector r = IntVector.fromArray(species, ar, 0);
@@ -3308,11 +3300,11 @@ public abstract class IntVector extends AbstractVector<Integer> {
                                            VectorMask<Integer> m) {
         IntSpecies vsp = (IntSpecies) species;
         if (VectorIntrinsics.indexInRange(offset, vsp.vectorByteSize(), ms.byteSize())) {
-            return vsp.dummyVector().fromMemorySegment0(ms, offset, m, OFFSET_IN_RANGE).maybeSwap(bo);
+            return vsp.dummyVectorMF().fromMemorySegment0(ms, offset, m, OFFSET_IN_RANGE).maybeSwap(bo);
         }
 
         checkMaskFromIndexSize(offset, vsp, m, 4, ms.byteSize());
-        return vsp.dummyVector().fromMemorySegment0(ms, offset, m, OFFSET_OUT_OF_RANGE).maybeSwap(bo);
+        return vsp.dummyVectorMF().fromMemorySegment0(ms, offset, m, OFFSET_OUT_OF_RANGE).maybeSwap(bo);
     }
 
     // Memory store operations
@@ -3917,9 +3909,10 @@ public abstract class IntVector extends AbstractVector<Integer> {
         private IntSpecies(VectorShape shape,
                 Class<? extends IntVector> vectorType,
                 Class<? extends AbstractMask<Integer>> maskType,
+                Class<? extends AbstractShuffle<Integer>> shuffleType,
                 Function<Object, IntVector> vectorFactory) {
             super(shape, LaneType.of(int.class),
-                  vectorType, maskType,
+                  vectorType, maskType, shuffleType,
                   vectorFactory);
             assert(this.elementSize() == Integer.SIZE);
         }
@@ -4011,7 +4004,7 @@ public abstract class IntVector extends AbstractVector<Integer> {
                     throw badElementBits(lv, v);
                 }
             }
-            return dummyVector().fromArray0(va, 0);
+            return dummyVectorMF().fromArray0(va, 0);
         }
 
         // Virtual constructors
@@ -4022,12 +4015,6 @@ public abstract class IntVector extends AbstractVector<Integer> {
             // User entry point:  Be careful with inputs.
             return IntVector
                 .fromArray(this, (int[]) a, offset);
-        }
-
-        @ForceInline
-        @Override final
-        IntVector dummyVector() {
-            return (IntVector) super.dummyVector();
         }
 
         @ForceInline
@@ -4060,9 +4047,10 @@ public abstract class IntVector extends AbstractVector<Integer> {
 
         IntVector vOpMF(VectorMask<Integer> m, FVOp f) {
             int[] res = new int[laneCount()];
-            boolean[] mbits = ((AbstractMask<Integer>)m).getBits();
+            VectorPayloadMF mbits = ((AbstractMask<Integer>)m).getBits();
+            long mOffset = mbits.multiFieldOffset();
             for (int i = 0; i < res.length; i++) {
-                if (mbits[i]) {
+                if (Unsafe.getUnsafe().getBoolean(mbits, mOffset + i)) {
                     res[i] = f.apply(i);
                 }
             }
@@ -4141,9 +4129,8 @@ public abstract class IntVector extends AbstractVector<Integer> {
         @Override
         @ForceInline
         public final IntVector zero() {
-            // FIXME: Enable once multi-field based MaxVector is supported.
-            //if ((Class<?>) vectorType() == IntMaxVector.class)
-            //    return IntMaxVector.ZERO;
+            if ((Class<?>) vectorType() == IntMaxVector.class)
+                return IntMaxVector.ZERO;
             switch (vectorBitSize()) {
                 case 64: return Int64Vector.ZERO;
                 case 128: return Int128Vector.ZERO;
@@ -4156,9 +4143,8 @@ public abstract class IntVector extends AbstractVector<Integer> {
         @Override
         @ForceInline
         public final IntVector iota() {
-            // FIXME: Enable once multi-field based MaxVector is supported.
-            //if ((Class<?>) vectorType() == IntMaxVector.class)
-            //    return IntMaxVector.IOTA;
+            if ((Class<?>) vectorType() == IntMaxVector.class)
+                return IntMaxVector.IOTA;
             switch (vectorBitSize()) {
                 case 64: return Int64Vector.IOTA;
                 case 128: return Int128Vector.IOTA;
@@ -4172,9 +4158,8 @@ public abstract class IntVector extends AbstractVector<Integer> {
         @Override
         @ForceInline
         public final VectorMask<Integer> maskAll(boolean bit) {
-            // FIXME: Enable once multi-field based MaxVector is supported.
-            //if ((Class<?>) vectorType() == IntMaxVector.class)
-            //    return IntMaxVector.IntMaxMask.maskAll(bit);
+            if ((Class<?>) vectorType() == IntMaxVector.class)
+                return IntMaxVector.IntMaxMask.maskAll(bit);
             switch (vectorBitSize()) {
                 case 64: return Int64Vector.Int64Mask.maskAll(bit);
                 case 128: return Int128Vector.Int128Mask.maskAll(bit);
@@ -4209,8 +4194,7 @@ public abstract class IntVector extends AbstractVector<Integer> {
             case VectorShape.SK_128_BIT: return (IntSpecies) SPECIES_128;
             case VectorShape.SK_256_BIT: return (IntSpecies) SPECIES_256;
             case VectorShape.SK_512_BIT: return (IntSpecies) SPECIES_512;
-            // FIXME: Enable once multi-field based MaxVector is supported.
-            //case VectorShape.SK_Max_BIT: return (IntSpecies) SPECIES_MAX;
+            case VectorShape.SK_Max_BIT: return (IntSpecies) SPECIES_MAX;
             default: throw new IllegalArgumentException("Bad shape: " + s);
         }
     }
@@ -4220,6 +4204,7 @@ public abstract class IntVector extends AbstractVector<Integer> {
         = new IntSpecies(VectorShape.S_64_BIT,
                             Int64Vector.class,
                             Int64Vector.Int64Mask.class,
+                            Int64Vector.Int64Shuffle.class,
                             Int64Vector::new);
 
     /** Species representing {@link IntVector}s of {@link VectorShape#S_128_BIT VectorShape.S_128_BIT}. */
@@ -4227,6 +4212,7 @@ public abstract class IntVector extends AbstractVector<Integer> {
         = new IntSpecies(VectorShape.S_128_BIT,
                             Int128Vector.class,
                             Int128Vector.Int128Mask.class,
+                            Int128Vector.Int128Shuffle.class,
                             Int128Vector::new);
 
     /** Species representing {@link IntVector}s of {@link VectorShape#S_256_BIT VectorShape.S_256_BIT}. */
@@ -4234,6 +4220,7 @@ public abstract class IntVector extends AbstractVector<Integer> {
         = new IntSpecies(VectorShape.S_256_BIT,
                             Int256Vector.class,
                             Int256Vector.Int256Mask.class,
+                            Int256Vector.Int256Shuffle.class,
                             Int256Vector::new);
 
     /** Species representing {@link IntVector}s of {@link VectorShape#S_512_BIT VectorShape.S_512_BIT}. */
@@ -4241,16 +4228,16 @@ public abstract class IntVector extends AbstractVector<Integer> {
         = new IntSpecies(VectorShape.S_512_BIT,
                             Int512Vector.class,
                             Int512Vector.Int512Mask.class,
+                            Int512Vector.Int512Shuffle.class,
                             Int512Vector::new);
 
     /** Species representing {@link IntVector}s of {@link VectorShape#S_Max_BIT VectorShape.S_Max_BIT}. */
-    // FIXME: Enable once multi-field based MaxVector is supported.
-    /*public static final VectorSpecies<Integer> SPECIES_MAX
+    public static final VectorSpecies<Integer> SPECIES_MAX
         = new IntSpecies(VectorShape.S_Max_BIT,
                             IntMaxVector.class,
                             IntMaxVector.IntMaxMask.class,
+                            IntMaxVector.IntMaxShuffle.class,
                             IntMaxVector::new);
-     */
 
     /**
      * Preferred species for {@link IntVector}s.

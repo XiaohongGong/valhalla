@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,13 +34,47 @@ import jdk.internal.vm.vector.VectorSupport;
 
 import static jdk.incubator.vector.VectorOperators.*;
 
+import static jdk.internal.vm.vector.VectorSupport.*;
+
 abstract class AbstractMask<E> extends VectorMask<E> {
-    AbstractMask(boolean[] bits) {
-        super(bits);
-    }
 
     /*package-private*/
-    abstract boolean[] getBits();
+    abstract VectorPayloadMF getBits();
+
+    /*package-private*/
+    abstract long multiFieldOffset();
+
+    /*package-private*/
+    @ForceInline
+    static <F> VectorPayloadMF createPayloadInstance(VectorSpecies<F> species) {
+        boolean isMaxShape = species.vectorShape() == VectorShape.S_Max_BIT;
+        Class<?> etype = isMaxShape ? species.elementType() : boolean.class;
+        int length = species.length();
+        return VectorPayloadMF.newInstanceFactory(etype, length, isMaxShape, true);
+    }
+
+    static <F> VectorPayloadMF prepare(VectorPayloadMF payload, int offset, VectorSpecies<F> species) {
+        VectorPayloadMF res = createPayloadInstance(species);
+        res = Unsafe.getUnsafe().makePrivateBuffer(res);
+        long mOffset = res.multiFieldOffset();
+        for (int i = 0; i < species.length(); i++) {
+            boolean b = Unsafe.getUnsafe().getBoolean(payload, mOffset + i + offset);
+            Unsafe.getUnsafe().putBoolean(res, mOffset + i, b);
+        }
+        res = Unsafe.getUnsafe().finishPrivateBuffer(res);
+        return res;
+    }
+
+    static <F> VectorPayloadMF prepare(boolean val, VectorSpecies<F> species) {
+        VectorPayloadMF res = createPayloadInstance(species);
+        res = Unsafe.getUnsafe().makePrivateBuffer(res);
+        long mOffset = res.multiFieldOffset();
+        for (int i = 0; i < species.length(); i++) {
+            Unsafe.getUnsafe().putBoolean(res, mOffset + i, val);
+        }
+        res = Unsafe.getUnsafe().finishPrivateBuffer(res);
+        return res;
+    }
 
     // Unary operator
 
@@ -48,7 +82,19 @@ abstract class AbstractMask<E> extends VectorMask<E> {
         boolean apply(int i, boolean a);
     }
 
-    abstract AbstractMask<E> uOp(MUnOp f);
+    AbstractMask<E> uOpMF(MUnOp f) {
+        int length = vspecies().laneCount();
+        VectorPayloadMF bits = getBits();
+        VectorPayloadMF res = createPayloadInstance(vspecies());
+        res = Unsafe.getUnsafe().makePrivateBuffer(res);
+        long mOffset = res.multiFieldOffset();
+        for (int i = 0; i < length; i++) {
+            boolean b = Unsafe.getUnsafe().getBoolean(bits, mOffset + i);
+            Unsafe.getUnsafe().putBoolean(res, mOffset + i, f.apply(i, b));
+        }
+        res = Unsafe.getUnsafe().finishPrivateBuffer(res);
+        return vspecies().maskFactory(res);
+    }
 
     // Binary operator
 
@@ -56,7 +102,31 @@ abstract class AbstractMask<E> extends VectorMask<E> {
         boolean apply(int i, boolean a, boolean b);
     }
 
-    abstract AbstractMask<E> bOp(VectorMask<E> o, MBinOp f);
+    AbstractMask<E> bOpMF(AbstractMask<E> m, MBinOp f) {
+        int length = vspecies().laneCount();
+        VectorPayloadMF bits = getBits();
+        VectorPayloadMF mbits = m.getBits();
+        VectorPayloadMF res = createPayloadInstance(vspecies());
+        res = Unsafe.getUnsafe().makePrivateBuffer(res);
+        long mOffset = res.multiFieldOffset();
+        for (int i = 0; i < length; i++) {
+            boolean b = Unsafe.getUnsafe().getBoolean(bits, mOffset + i);
+            boolean mb = Unsafe.getUnsafe().getBoolean(mbits, mOffset + i);
+            Unsafe.getUnsafe().putBoolean(res, mOffset + i, f.apply(i, b, mb));
+        }
+        res = Unsafe.getUnsafe().finishPrivateBuffer(res);
+        return vspecies().maskFactory(res);
+    }
+
+    // Store operator
+
+    void stOpMF(boolean[] arr, int idx) {
+        VectorPayloadMF bits = getBits();
+        long mOffset = multiFieldOffset();
+        for (int i = 0; i < vspecies().laneCount(); i++) {
+            arr[idx++] = Unsafe.getUnsafe().getBoolean(bits, mOffset + i);
+        }
+    }
 
     /*package-private*/
     abstract AbstractSpecies<E> vspecies();
@@ -69,13 +139,28 @@ abstract class AbstractMask<E> extends VectorMask<E> {
 
     @Override
     @ForceInline
+    public <F> VectorMask<F> cast(VectorSpecies<F> dsp) {
+        AbstractSpecies<F> species = (AbstractSpecies<F>) dsp;
+        if (length() != species.laneCount())
+            throw new IllegalArgumentException("VectorMask length and species length differ");
+
+        return VectorSupport.convert(VectorSupport.VECTOR_OP_CAST,
+                this.getClass(), vspecies().elementType(), vspecies().laneCount,
+                species.maskType(), species.elementType(), vspecies().laneCount,
+                this, species,
+                (m, s) -> s.maskFactory(m.getBits()).check(s));
+    }
+
+    @Override
+    @ForceInline
     public boolean laneIsSet(int i) {
         int length = length();
         Objects.checkIndex(i, length);
         if (length <= Long.SIZE) {
             return ((toLong() >>> i) & 1L) == 1;
         } else {
-            return getBits()[i];
+            VectorPayloadMF bits = getBits();
+            return Unsafe.getUnsafe().getBoolean(bits, bits.multiFieldOffset() + i);
         }
     }
 
@@ -88,13 +173,14 @@ abstract class AbstractMask<E> extends VectorMask<E> {
             vsp.maskType(), vsp.elementType(), laneCount,
             bits, (long) i + Unsafe.ARRAY_BOOLEAN_BASE_OFFSET,
             this, bits, i,
-            (c, idx, s) -> System.arraycopy(s.getBits(), 0, c, (int) idx, s.length()));
-
+            (c, idx, s) -> s.stOpMF(c, (int) idx));
     }
 
     @Override
     public boolean[] toArray() {
-        return getBits().clone();
+        boolean[] arr = new boolean[length()];
+        intoArray(arr, 0);
+        return arr;
     }
 
     @Override
@@ -137,81 +223,127 @@ abstract class AbstractMask<E> extends VectorMask<E> {
     }
 
     @Override
-    public VectorMask<E> andNot(VectorMask<E> m) {
+    @ForceInline
+    public final VectorMask<E> andNot(VectorMask<E> m) {
         return and(m.not());
     }
 
+    @Override
+    @ForceInline
+    public final VectorMask<E> eq(VectorMask<E> m) {
+        return xor(m.not());
+    }
+
     /*package-private*/
-    static boolean anyTrueHelper(boolean[] bits) {
+    boolean anyTrueHelper() {
         // FIXME: Maybe use toLong() != 0 here.
-        for (boolean i : bits) {
-            if (i) return true;
+        VectorPayloadMF bits = getBits();
+        long mOffset = bits.multiFieldOffset();
+        for (int i = 0; i < length(); i++) {
+            if (Unsafe.getUnsafe().getBoolean(bits, mOffset + i)) return true;
         }
         return false;
     }
 
     /*package-private*/
-    static boolean allTrueHelper(boolean[] bits) {
+    boolean allTrueHelper() {
         // FIXME: Maybe use not().toLong() == 0 here.
-        for (boolean i : bits) {
-            if (!i) return false;
+        VectorPayloadMF bits = getBits();
+        long mOffset = bits.multiFieldOffset();
+        for (int i = 0; i < length(); i++) {
+            if (!Unsafe.getUnsafe().getBoolean(bits, mOffset + i)) return false;
         }
         return true;
     }
 
     /*package-private*/
-    static int trueCountHelper(boolean[] bits) {
+    int trueCountHelper() {
         int c = 0;
-        for (boolean i : bits) {
-            if (i) c++;
+        VectorPayloadMF bits = getBits();
+        long mOffset = bits.multiFieldOffset();
+        for (int i = 0; i < length(); i++) {
+            if (Unsafe.getUnsafe().getBoolean(bits, mOffset + i)) c++;
         }
         return c;
     }
 
     /*package-private*/
-    static int firstTrueHelper(boolean[] bits) {
-        for (int i = 0; i < bits.length; i++) {
-            if (bits[i])  return i;
+    int firstTrueHelper() {
+        VectorPayloadMF bits = getBits();
+        long mOffset = bits.multiFieldOffset();
+        for (int i = 0; i < length(); i++) {
+            if (Unsafe.getUnsafe().getBoolean(bits, mOffset + i)) return i;
         }
-        return bits.length;
+        return length();
     }
 
     /*package-private*/
-    static int lastTrueHelper(boolean[] bits) {
-        for (int i = bits.length-1; i >= 0; i--) {
-            if (bits[i])  return i;
+    int lastTrueHelper() {
+        VectorPayloadMF bits = getBits();
+        long mOffset = bits.multiFieldOffset();
+        for (int i = length() - 1; i >= 0; i--) {
+            if (Unsafe.getUnsafe().getBoolean(bits, mOffset + i)) return i;
         }
         return -1;
     }
 
     /*package-private*/
-    static long toLongHelper(boolean[] bits) {
+    long toLongHelper() {
         long res = 0;
         long set = 1;
-        for (int i = 0; i < bits.length; i++) {
-            res = bits[i] ? res | set : res;
+        VectorPayloadMF bits = getBits();
+        long mOffset = bits.multiFieldOffset();
+        for (int i = 0; i < length(); i++) {
+            res = Unsafe.getUnsafe().getBoolean(bits, mOffset + i) ? res | set : res;
             set = set << 1;
         }
         return res;
     }
 
-    @Override
+    /*package-private*/
     @ForceInline
-    public VectorMask<E> indexInRange(int offset, int limit) {
+    VectorMask<E> indexPartiallyInRange(int offset, int limit) {
         int vlength = length();
         Vector<E> iota = vectorSpecies().zero().addIndex(1);
         VectorMask<E> badMask = checkIndex0(offset, limit, iota, vlength);
-        return this.andNot(badMask);
+        return badMask.not();
+    }
+
+    /*package-private*/
+    @ForceInline
+    VectorMask<E> indexPartiallyInRange(long offset, long limit) {
+        int vlength = length();
+        Vector<E> iota = vectorSpecies().zero().addIndex(1);
+        VectorMask<E> badMask = checkIndex0(offset, limit, iota, vlength);
+        return badMask.not();
     }
 
     @Override
     @ForceInline
-    public VectorMask<E> indexInRange(long offset, long limit) {
-        int vlength = length();
-        Vector<E> iota = vectorSpecies().zero().addIndex(1);
-        VectorMask<E> badMask = checkIndex0(offset, limit, iota, vlength);
-        return this.andNot(badMask);
+    public VectorMask<E> indexInRange(int offset, int limit) {
+        if (offset < 0) {
+            return this.and(indexPartiallyInRange(offset, limit));
+        } else if (offset >= limit) {
+            return vectorSpecies().maskAll(false);
+        } else if (limit - offset >= length()) {
+            return this;
+        }
+        return this.and(indexPartiallyInUpperRange(offset, limit));
     }
+
+    @ForceInline
+    public VectorMask<E> indexInRange(long offset, long limit) {
+        if (offset < 0) {
+            return this.and(indexPartiallyInRange(offset, limit));
+        } else if (offset >= limit) {
+            return vectorSpecies().maskAll(false);
+        } else if (limit - offset >= length()) {
+            return this;
+        }
+        return this.and(indexPartiallyInUpperRange(offset, limit));
+    }
+
+    abstract VectorMask<E> indexPartiallyInUpperRange(long offset, long limit);
 
     /*package-private*/
     @ForceInline

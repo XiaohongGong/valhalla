@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -40,6 +40,7 @@
 #include "oops/method.hpp"
 #include "oops/oop.inline.hpp"
 #include "oops/objArrayKlass.hpp"
+#include "prims/vectorSupport.hpp"
 #include "runtime/fieldDescriptor.inline.hpp"
 #include "runtime/handles.inline.hpp"
 #include "runtime/safepointVerifiers.hpp"
@@ -51,6 +52,12 @@
   // Constructor
 InlineKlass::InlineKlass(const ClassFileParser& parser)
     : InstanceKlass(parser, InlineKlass::Kind) {
+  set_prototype_header(markWord::inline_type_prototype());
+  assert(is_inline_klass(), "sanity");
+  assert(prototype_header().is_inline_type(), "sanity");
+}
+
+void InlineKlass::init_fixed_block() {
   _adr_inlineklass_fixed_block = inlineklass_static_block();
   // Addresses used for inline type calling convention
   *((Array<SigEntry>**)adr_extended_sig()) = NULL;
@@ -61,9 +68,6 @@ InlineKlass::InlineKlass(const ClassFileParser& parser)
   assert(pack_handler() == NULL, "pack handler not null");
   *((int*)adr_default_value_offset()) = 0;
   *((address*)adr_value_array_klasses()) = NULL;
-  set_prototype_header(markWord::inline_type_prototype());
-  assert(is_inline_klass(), "sanity");
-  assert(prototype_header().is_inline_type(), "sanity");
 }
 
 oop InlineKlass::default_value() {
@@ -237,6 +241,7 @@ int InlineKlass::collect_fields(GrowableArray<SigEntry>* sig, int base_off) {
   SigEntry::add_entry(sig, T_PRIMITIVE_OBJECT, name(), base_off);
   for (JavaFieldStream fs(this); !fs.done(); fs.next()) {
     if (fs.access_flags().is_static()) continue;
+    if (fs.is_multifield()) continue;
     int offset = base_off + fs.offset() - (base_off > 0 ? first_field_offset() : 0);
     if (fs.is_inlined()) {
       // Resolve klass of inlined field and recursively collect fields
@@ -331,12 +336,12 @@ void InlineKlass::cleanup_blobs() {
 
 // Can this inline type be passed as multiple values?
 bool InlineKlass::can_be_passed_as_fields() const {
-  return InlineTypePassFieldsAsArgs;
+  return !VectorSupport::skip_value_scalarization(const_cast<InlineKlass*>(this)) && InlineTypePassFieldsAsArgs;
 }
 
 // Can this inline type be returned as multiple values?
 bool InlineKlass::can_be_returned_as_fields(bool init) const {
-  return InlineTypeReturnedAsFields && (init || return_regs() != NULL);
+  return !VectorSupport::skip_value_scalarization(const_cast<InlineKlass*>(this)) && InlineTypeReturnedAsFields && (init || return_regs() != NULL);
 }
 
 // Create handles for all oop fields returned in registers that are going to be live across a safepoint
@@ -486,29 +491,26 @@ InlineKlass* InlineKlass::returned_inline_klass(const RegisterMap& map) {
   address loc = map.location(pair.first(), nullptr);
   intptr_t ptr = *(intptr_t*)loc;
   if (is_set_nth_bit(ptr, 0)) {
-    // Oop is tagged, must be an InlineKlass oop
+    // Return value is tagged, must be an InlineKlass pointer
     clear_nth_bit(ptr, 0);
     assert(Metaspace::contains((void*)ptr), "should be klass");
     InlineKlass* vk = (InlineKlass*)ptr;
     assert(vk->can_be_returned_as_fields(), "must be able to return as fields");
     return vk;
   }
-#ifdef ASSERT
-  // Oop is not tagged, must be a valid oop
-  if (VerifyOops) {
-    oopDesc::verify(cast_to_oop(ptr));
-  }
-#endif
+  // Return value is not tagged, must be a valid oop
+  assert(oopDesc::is_oop_or_null(cast_to_oop(ptr), true),
+         "Bad oop return: " PTR_FORMAT, ptr);
   return NULL;
 }
 
 // CDS support
 
+#if INCLUDE_CDS
 void InlineKlass::metaspace_pointers_do(MetaspaceClosure* it) {
   InstanceKlass::metaspace_pointers_do(it);
 
   InlineKlass* this_ptr = this;
-  it->push_internal_pointer(&this_ptr, (intptr_t*)&_adr_inlineklass_fixed_block);
   it->push((Klass**)adr_value_array_klasses());
 }
 
@@ -534,11 +536,16 @@ void InlineKlass::remove_java_mirror() {
 }
 
 void InlineKlass::restore_unshareable_info(ClassLoaderData* loader_data, Handle protection_domain, PackageEntry* pkg_entry, TRAPS) {
+  // We are no longer bookkeeping pointer to InlineKlassFixedBlock during serialization, hence re-initializing
+  // fixed block address since InstanceKlass::size() already take into account its size, thus it will anyways
+  // be part of shared archive.
+  _adr_inlineklass_fixed_block = inlineklass_static_block();
   InstanceKlass::restore_unshareable_info(loader_data, protection_domain, pkg_entry, CHECK);
   if (value_array_klasses() != NULL) {
     value_array_klasses()->restore_unshareable_info(ClassLoaderData::the_null_class_loader_data(), Handle(), CHECK);
   }
 }
+#endif
 
 // oop verify
 

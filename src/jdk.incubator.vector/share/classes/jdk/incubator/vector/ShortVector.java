@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -57,7 +57,7 @@ public abstract class ShortVector extends AbstractVector<Short> {
      */
     public ShortVector() {}
 
-    static final ValueLayout.OfShort ELEMENT_LAYOUT = ValueLayout.JAVA_SHORT.withBitAlignment(8);
+    static final ValueLayout.OfShort ELEMENT_LAYOUT = ValueLayout.JAVA_SHORT.withByteAlignment(1);
 
     @ForceInline
     static int opCode(Operator op) {
@@ -93,20 +93,13 @@ public abstract class ShortVector extends AbstractVector<Short> {
 
     // Virtualized getter
 
-    /*package-private*/
-    abstract short[] vec();
-
-    abstract VectorPayloadMF vec_mf();
-
     // Virtualized constructors
 
     /**
      * Build a vector directly using my own constructor.
-     * It is an error if the array is aliased elsewhere.
+     * It is an error if the vec is aliased elsewhere.
      */
     /*package-private*/
-    abstract ShortVector vectorFactory(short[] vec);
-
     abstract ShortVector vectorFactory(VectorPayloadMF vec);
 
     /**
@@ -116,8 +109,8 @@ public abstract class ShortVector extends AbstractVector<Short> {
     /*package-private*/
     @ForceInline
     final
-    AbstractMask<Short> maskFactory(boolean[] bits) {
-        return vspecies().maskFactory(bits);
+    AbstractMask<Short> maskFactory(VectorPayloadMF payload) {
+        return vspecies().maskFactory(payload);
     }
 
     // Constant loader (takes dummy as vector arg)
@@ -141,9 +134,10 @@ public abstract class ShortVector extends AbstractVector<Short> {
     final
     ShortVector vOpMF(VectorMask<Short> m, FVOp f) {
         short[] res = new short[length()];
-        boolean[] mbits = ((AbstractMask<Short>)m).getBits();
+        VectorPayloadMF mbits = ((AbstractMask<Short>)m).getBits();
+        long mOffset = mbits.multiFieldOffset();
         for (int i = 0; i < res.length; i++) {
-            if (mbits[i]) {
+            if (Unsafe.getUnsafe().getBoolean(mbits, mOffset + i)) {
                 res[i] = f.apply(i);
             }
         }
@@ -164,13 +158,13 @@ public abstract class ShortVector extends AbstractVector<Short> {
     @ForceInline
     final
     ShortVector uOpTemplateMF(FUnOp f) {
-        VectorPayloadMF vec = this.vec_mf();
+        VectorPayloadMF vec = this.vec();
         VectorPayloadMF tpayload = Unsafe.getUnsafe().makePrivateBuffer(vec);
-        long start_offset = this.multiFieldOffset();
+        long vOffset = this.multiFieldOffset();
         int length = vspecies().length();
         for (int i = 0; i < length; i++) {
-            short v = Unsafe.getUnsafe().getShort(vec, start_offset + i * Short.BYTES);
-            Unsafe.getUnsafe().putShort(tpayload, start_offset + i * Short.BYTES, f.apply(i, v));
+            short v = Unsafe.getUnsafe().getShort(vec, vOffset + i * Short.BYTES);
+            Unsafe.getUnsafe().putShort(tpayload, vOffset + i * Short.BYTES, f.apply(i, v));
         }
         tpayload = Unsafe.getUnsafe().finishPrivateBuffer(tpayload);
         return vectorFactory(tpayload);
@@ -187,14 +181,16 @@ public abstract class ShortVector extends AbstractVector<Short> {
         if (m == null) {
             return uOpTemplateMF(f);
         }
-        boolean[] mbits = ((AbstractMask<Short>)m).getBits();
-        VectorPayloadMF vec = this.vec_mf();
+        VectorPayloadMF mbits = ((AbstractMask<Short>)m).getBits();
+        VectorPayloadMF vec = this.vec();
         VectorPayloadMF tpayload = Unsafe.getUnsafe().makePrivateBuffer(vec);
-        long start_offset = this.multiFieldOffset();
+        long vOffset = this.multiFieldOffset();
+        long mOffset = mbits.multiFieldOffset();
         int length = vspecies().length();
         for (int i = 0; i < length; i++) {
-            short v = Unsafe.getUnsafe().getShort(vec, start_offset + i * Short.BYTES);
-            Unsafe.getUnsafe().putShort(tpayload, start_offset + i * Short.BYTES, mbits[i] ? f.apply(i, v): v);
+            short v = Unsafe.getUnsafe().getShort(vec, vOffset + i * Short.BYTES);
+            v = Unsafe.getUnsafe().getBoolean(mbits, mOffset + i) ? f.apply(i, v) : v;
+            Unsafe.getUnsafe().putShort(tpayload, vOffset + i * Short.BYTES, v);
         }
         tpayload = Unsafe.getUnsafe().finishPrivateBuffer(tpayload);
         return vectorFactory(tpayload);
@@ -215,15 +211,15 @@ public abstract class ShortVector extends AbstractVector<Short> {
     final
     ShortVector bOpTemplateMF(Vector<Short> o,
                                      FBinOp f) {
-        VectorPayloadMF vec1 = this.vec_mf();
-        VectorPayloadMF vec2 = ((ShortVector)o).vec_mf();
+        VectorPayloadMF vec1 = vec();
+        VectorPayloadMF vec2 = ((ShortVector)o).vec();
         VectorPayloadMF tpayload = Unsafe.getUnsafe().makePrivateBuffer(vec1);
-        long start_offset = this.multiFieldOffset();
+        long vOffset = this.multiFieldOffset();
         int length = vspecies().length();
         for (int i = 0; i < length; i++) {
-            short v1 = Unsafe.getUnsafe().getShort(vec1, start_offset + i * Short.BYTES);
-            short v2 = Unsafe.getUnsafe().getShort(vec2, start_offset + i * Short.BYTES);
-            Unsafe.getUnsafe().putShort(tpayload, start_offset + i * Short.BYTES, f.apply(i, v1, v2));
+            short v1 = Unsafe.getUnsafe().getShort(vec1, vOffset + i * Short.BYTES);
+            short v2 = Unsafe.getUnsafe().getShort(vec2, vOffset + i * Short.BYTES);
+            Unsafe.getUnsafe().putShort(tpayload, vOffset + i * Short.BYTES, f.apply(i, v1, v2));
         }
         tpayload = Unsafe.getUnsafe().finishPrivateBuffer(tpayload);
         return vectorFactory(tpayload);
@@ -242,16 +238,18 @@ public abstract class ShortVector extends AbstractVector<Short> {
         if (m == null) {
             return bOpTemplateMF(o, f);
         }
-        boolean[] mbits = ((AbstractMask<Short>)m).getBits();
-        VectorPayloadMF vec1 = this.vec_mf();
-        VectorPayloadMF vec2 = ((ShortVector)o).vec_mf();
+        VectorPayloadMF mbits = ((AbstractMask<Short>)m).getBits();
+        VectorPayloadMF vec1 = this.vec();
+        VectorPayloadMF vec2 = ((ShortVector)o).vec();
         VectorPayloadMF tpayload = Unsafe.getUnsafe().makePrivateBuffer(vec1);
-        long start_offset = this.multiFieldOffset();
+        long vOffset = this.multiFieldOffset();
+        long mOffset = mbits.multiFieldOffset();
         int length = vspecies().length();
         for (int i = 0; i < length; i++) {
-            short v1 = Unsafe.getUnsafe().getShort(vec1, start_offset + i * Short.BYTES);
-            short v2 = Unsafe.getUnsafe().getShort(vec2, start_offset + i * Short.BYTES);
-            Unsafe.getUnsafe().putShort(tpayload, start_offset + i * Short.BYTES, mbits[i] ? f.apply(i, v1, v2): v1);
+            short v1 = Unsafe.getUnsafe().getShort(vec1, vOffset + i * Short.BYTES);
+            short v2 = Unsafe.getUnsafe().getShort(vec2, vOffset + i * Short.BYTES);
+            short v = Unsafe.getUnsafe().getBoolean(mbits, mOffset + i) ? f.apply(i, v1, v2) : v1;
+            Unsafe.getUnsafe().putShort(tpayload, vOffset + i * Short.BYTES, v);
         }
         tpayload = Unsafe.getUnsafe().finishPrivateBuffer(tpayload);
         return vectorFactory(tpayload);
@@ -274,17 +272,17 @@ public abstract class ShortVector extends AbstractVector<Short> {
     ShortVector tOpTemplateMF(Vector<Short> o1,
                                      Vector<Short> o2,
                                      FTriOp f) {
-        VectorPayloadMF vec1 = this.vec_mf();
-        VectorPayloadMF vec2 = ((ShortVector)o1).vec_mf();
-        VectorPayloadMF vec3 = ((ShortVector)o2).vec_mf();
+        VectorPayloadMF vec1 = this.vec();
+        VectorPayloadMF vec2 = ((ShortVector)o1).vec();
+        VectorPayloadMF vec3 = ((ShortVector)o2).vec();
         VectorPayloadMF tpayload = Unsafe.getUnsafe().makePrivateBuffer(vec1);
-        long start_offset = this.multiFieldOffset();
+        long vOffset = this.multiFieldOffset();
         int length = vspecies().length();
         for (int i = 0; i < length; i++) {
-            short v1 = Unsafe.getUnsafe().getShort(vec1, start_offset + i * Short.BYTES);
-            short v2 = Unsafe.getUnsafe().getShort(vec2, start_offset + i * Short.BYTES);
-            short v3 = Unsafe.getUnsafe().getShort(vec3, start_offset + i * Short.BYTES);
-            Unsafe.getUnsafe().putShort(tpayload, start_offset + i * Short.BYTES, f.apply(i, v1, v2, v3));
+            short v1 = Unsafe.getUnsafe().getShort(vec1, vOffset + i * Short.BYTES);
+            short v2 = Unsafe.getUnsafe().getShort(vec2, vOffset + i * Short.BYTES);
+            short v3 = Unsafe.getUnsafe().getShort(vec3, vOffset + i * Short.BYTES);
+            Unsafe.getUnsafe().putShort(tpayload, vOffset + i * Short.BYTES, f.apply(i, v1, v2, v3));
         }
         tpayload = Unsafe.getUnsafe().finishPrivateBuffer(tpayload);
         return vectorFactory(tpayload);
@@ -305,18 +303,20 @@ public abstract class ShortVector extends AbstractVector<Short> {
         if (m == null) {
             return tOpTemplateMF(o1, o2, f);
         }
-        boolean[] mbits = ((AbstractMask<Short>)m).getBits();
-        VectorPayloadMF vec1 = this.vec_mf();
-        VectorPayloadMF vec2 = ((ShortVector)o1).vec_mf();
-        VectorPayloadMF vec3 = ((ShortVector)o2).vec_mf();
+        VectorPayloadMF mbits = ((AbstractMask<Short>)m).getBits();
+        VectorPayloadMF vec1 = this.vec();
+        VectorPayloadMF vec2 = ((ShortVector)o1).vec();
+        VectorPayloadMF vec3 = ((ShortVector)o2).vec();
         VectorPayloadMF tpayload = Unsafe.getUnsafe().makePrivateBuffer(vec1);
-        long start_offset = this.multiFieldOffset();
+        long vOffset = this.multiFieldOffset();
+        long mOffset = mbits.multiFieldOffset();
         int length = vspecies().length();
         for (int i = 0; i < length; i++) {
-            short v1 = Unsafe.getUnsafe().getShort(vec1, start_offset + i * Short.BYTES);
-            short v2 = Unsafe.getUnsafe().getShort(vec2, start_offset + i * Short.BYTES);
-            short v3 = Unsafe.getUnsafe().getShort(vec3, start_offset + i * Short.BYTES);
-            Unsafe.getUnsafe().putShort(tpayload, start_offset + i * Short.BYTES, mbits[i] ? f.apply(i, v1, v2, v3): v1);
+            short v1 = Unsafe.getUnsafe().getShort(vec1, vOffset + i * Short.BYTES);
+            short v2 = Unsafe.getUnsafe().getShort(vec2, vOffset + i * Short.BYTES);
+            short v3 = Unsafe.getUnsafe().getShort(vec3, vOffset + i * Short.BYTES);
+            short v = Unsafe.getUnsafe().getBoolean(mbits, mOffset + i) ? f.apply(i, v1, v2, v3) : v1;
+            Unsafe.getUnsafe().putShort(tpayload, vOffset + i * Short.BYTES, v);
         }
         tpayload = Unsafe.getUnsafe().finishPrivateBuffer(tpayload);
         return vectorFactory(tpayload);
@@ -334,13 +334,14 @@ public abstract class ShortVector extends AbstractVector<Short> {
         if (m == null) {
             return rOpTemplateMF(v, f);
         }
-        VectorPayloadMF vec = this.vec_mf();
-        boolean[] mbits = ((AbstractMask<Short>)m).getBits();
-        long start_offset = this.multiFieldOffset();
+        VectorPayloadMF vec = this.vec();
+        VectorPayloadMF mbits = ((AbstractMask<Short>)m).getBits();
+        long vOffset = this.multiFieldOffset();
+        long mOffset = mbits.multiFieldOffset();
         int length = vspecies().length();
         for (int i = 0; i < length; i++) {
-            short v1 = Unsafe.getUnsafe().getShort(vec, start_offset + i * Short.BYTES);
-            v = mbits[i] ? f.apply(i, v, v1) : v;
+            short v1 = Unsafe.getUnsafe().getShort(vec, vOffset + i * Short.BYTES);
+            v = Unsafe.getUnsafe().getBoolean(mbits, mOffset + i) ? f.apply(i, v, v1) : v;
         }
         return v;
     }
@@ -348,11 +349,11 @@ public abstract class ShortVector extends AbstractVector<Short> {
     @ForceInline
     final
     short rOpTemplateMF(short v, FBinOp f) {
-        VectorPayloadMF vec = this.vec_mf();
-        long start_offset = this.multiFieldOffset();
+        VectorPayloadMF vec = vec();
+        long vOffset = this.multiFieldOffset();
         int length = vspecies().length();
         for (int i = 0; i < length; i++) {
-            short v1 = Unsafe.getUnsafe().getShort(vec, start_offset + i * Short.BYTES);
+            short v1 = Unsafe.getUnsafe().getShort(vec, vOffset + i * Short.BYTES);
             v = f.apply(i, v, v1);
         }
         return v;
@@ -372,11 +373,10 @@ public abstract class ShortVector extends AbstractVector<Short> {
                                   FLdOp<M> f) {
         int length = vspecies().length();
         VectorPayloadMF tpayload =
-            Unsafe.getUnsafe().makePrivateBuffer(VectorPayloadMF.createVectPayloadInstance(
-                Short.BYTES, length));
-        long start_offset = this.multiFieldOffset();
+            Unsafe.getUnsafe().makePrivateBuffer(createPayloadInstance(vspecies()));
+        long vOffset = this.multiFieldOffset();
         for (int i = 0; i < length; i++) {
-            Unsafe.getUnsafe().putShort(tpayload, start_offset + i * Short.BYTES, f.apply(memory, offset, i));
+            Unsafe.getUnsafe().putShort(tpayload, vOffset + i * Short.BYTES, f.apply(memory, offset, i));
         }
         tpayload = Unsafe.getUnsafe().finishPrivateBuffer(tpayload);
         return vectorFactory(tpayload);
@@ -390,13 +390,13 @@ public abstract class ShortVector extends AbstractVector<Short> {
                                   FLdOp<M> f) {
         int length = vspecies().length();
         VectorPayloadMF tpayload =
-            Unsafe.getUnsafe().makePrivateBuffer(VectorPayloadMF.createVectPayloadInstance(
-                Short.BYTES, length));
-        long start_offset = this.multiFieldOffset();
-        boolean[] mbits = ((AbstractMask<Short>)m).getBits();
+            Unsafe.getUnsafe().makePrivateBuffer(createPayloadInstance(vspecies()));
+        VectorPayloadMF mbits = ((AbstractMask<Short>)m).getBits();
+        long vOffset = this.multiFieldOffset();
+        long mOffset = mbits.multiFieldOffset();
         for (int i = 0; i < length; i++) {
-            if (mbits[i]) {
-                Unsafe.getUnsafe().putShort(tpayload, start_offset + i * Short.BYTES, f.apply(memory, offset, i));
+            if (Unsafe.getUnsafe().getBoolean(mbits, mOffset + i)) {
+                Unsafe.getUnsafe().putShort(tpayload, vOffset + i * Short.BYTES, f.apply(memory, offset, i));
             }
         }
         tpayload = Unsafe.getUnsafe().finishPrivateBuffer(tpayload);
@@ -416,11 +416,10 @@ public abstract class ShortVector extends AbstractVector<Short> {
                                   FLdLongOp f) {
         int length = vspecies().length();
         VectorPayloadMF tpayload =
-            Unsafe.getUnsafe().makePrivateBuffer(VectorPayloadMF.createVectPayloadInstance(
-                Short.BYTES, length));
-        long start_offset = this.multiFieldOffset();
+            Unsafe.getUnsafe().makePrivateBuffer(createPayloadInstance(vspecies()));
+        long vOffset = this.multiFieldOffset();
         for (int i = 0; i < length; i++) {
-            Unsafe.getUnsafe().putShort(tpayload, start_offset + i * Short.BYTES, f.apply(memory, offset, i));
+            Unsafe.getUnsafe().putShort(tpayload, vOffset + i * Short.BYTES, f.apply(memory, offset, i));
         }
         tpayload = Unsafe.getUnsafe().finishPrivateBuffer(tpayload);
         return vectorFactory(tpayload);
@@ -434,13 +433,13 @@ public abstract class ShortVector extends AbstractVector<Short> {
                                   FLdLongOp f) {
         int length = vspecies().length();
         VectorPayloadMF tpayload =
-            Unsafe.getUnsafe().makePrivateBuffer(VectorPayloadMF.createVectPayloadInstance(
-                Short.BYTES, length));
-        long start_offset = this.multiFieldOffset();
-        boolean[] mbits = ((AbstractMask<Short>)m).getBits();
+            Unsafe.getUnsafe().makePrivateBuffer(createPayloadInstance(vspecies()));
+        VectorPayloadMF mbits = ((AbstractMask<Short>)m).getBits();
+        long vOffset = this.multiFieldOffset();
+        long mOffset = mbits.multiFieldOffset();
         for (int i = 0; i < length; i++) {
-            if (mbits[i]) {
-                Unsafe.getUnsafe().putShort(tpayload, start_offset + i * Short.BYTES, f.apply(memory, offset, i));
+            if (Unsafe.getUnsafe().getBoolean(mbits, mOffset + i)) {
+                Unsafe.getUnsafe().putShort(tpayload, vOffset + i * Short.BYTES, f.apply(memory, offset, i));
             }
         }
         tpayload = Unsafe.getUnsafe().finishPrivateBuffer(tpayload);
@@ -460,11 +459,11 @@ public abstract class ShortVector extends AbstractVector<Short> {
     final
     <M> void stOpMF(M memory, int offset,
                   FStOp<M> f) {
-        VectorPayloadMF vec = vec_mf();
-        long start_offset = this.multiFieldOffset();
+        VectorPayloadMF vec = vec();
+        long vOffset = this.multiFieldOffset();
         int length = vspecies().length();
         for (int i = 0; i < length; i++) {
-            f.apply(memory, offset, i, Unsafe.getUnsafe().getShort(vec, start_offset + i * Short.BYTES));
+            f.apply(memory, offset, i, Unsafe.getUnsafe().getShort(vec, vOffset + i * Short.BYTES));
         }
     }
 
@@ -474,13 +473,14 @@ public abstract class ShortVector extends AbstractVector<Short> {
     <M> void stOpMF(M memory, int offset,
                   VectorMask<Short> m,
                   FStOp<M> f) {
-        VectorPayloadMF vec = vec_mf();
-        boolean[] mbits = ((AbstractMask<Short>)m).getBits();
-        long start_offset = this.multiFieldOffset();
+        VectorPayloadMF vec = vec();
+        VectorPayloadMF mbits = ((AbstractMask<Short>)m).getBits();
+        long vOffset = this.multiFieldOffset();
+        long mOffset = mbits.multiFieldOffset();
         int length = vspecies().length();
         for (int i = 0; i < length; i++) {
-            if (mbits[i]) {
-                f.apply(memory, offset, i, Unsafe.getUnsafe().getShort(vec, start_offset + i * Short.BYTES));
+            if (Unsafe.getUnsafe().getBoolean(mbits, mOffset + i)) {
+                f.apply(memory, offset, i, Unsafe.getUnsafe().getShort(vec, vOffset + i * Short.BYTES));
             }
         }
     }
@@ -495,11 +495,11 @@ public abstract class ShortVector extends AbstractVector<Short> {
     final
     void stLongOpMF(MemorySegment memory, long offset,
                   FStLongOp f) {
-        VectorPayloadMF vec = vec_mf();
-        long start_offset = this.multiFieldOffset();
+        VectorPayloadMF vec = vec();
+        long vOffset = this.multiFieldOffset();
         int length = vspecies().length();
         for (int i = 0; i < length; i++) {
-            f.apply(memory, offset, i, Unsafe.getUnsafe().getShort(vec, start_offset + i * Short.BYTES));
+            f.apply(memory, offset, i, Unsafe.getUnsafe().getShort(vec, vOffset + i * Short.BYTES));
         }
     }
 
@@ -509,13 +509,14 @@ public abstract class ShortVector extends AbstractVector<Short> {
     void stLongOpMF(MemorySegment memory, long offset,
                   VectorMask<Short> m,
                   FStLongOp f) {
-        VectorPayloadMF vec = vec_mf();
-        boolean[] mbits = ((AbstractMask<Short>)m).getBits();
-        long start_offset = this.multiFieldOffset();
+        VectorPayloadMF vec = vec();
+        VectorPayloadMF mbits = ((AbstractMask<Short>)m).getBits();
+        long vOffset = this.multiFieldOffset();
+        long mOffset = mbits.multiFieldOffset();
         int length = vspecies().length();
         for (int i = 0; i < length; i++) {
-            if (mbits[i]) {
-                f.apply(memory, offset, i, Unsafe.getUnsafe().getShort(vec, start_offset + i * Short.BYTES));
+            if (Unsafe.getUnsafe().getBoolean(mbits, mOffset + i)) {
+                f.apply(memory, offset, i, Unsafe.getUnsafe().getShort(vec, vOffset + i * Short.BYTES));
             }
         }
     }
@@ -537,17 +538,20 @@ public abstract class ShortVector extends AbstractVector<Short> {
     AbstractMask<Short> bTestMF(int cond,
                                   Vector<Short> o,
                                   FBinTest f) {
-        VectorPayloadMF vec1 = this.vec_mf();
-        VectorPayloadMF vec2 = ((ShortVector)o).vec_mf();
         int length = vspecies().length();
-        long start_offset = this.multiFieldOffset();
-        boolean[] bits = new boolean[length];
+        VectorPayloadMF vec1 = vec();
+        VectorPayloadMF vec2 = ((ShortVector)o).vec();
+        VectorPayloadMF mbits = AbstractMask.createPayloadInstance(vspecies());
+        mbits = Unsafe.getUnsafe().makePrivateBuffer(mbits);
+        long vOffset = this.multiFieldOffset();
+        long mOffset = mbits.multiFieldOffset();
         for (int i = 0; i < length; i++) {
-            short v1 = Unsafe.getUnsafe().getShort(vec1, start_offset + i * Short.BYTES);
-            short v2 = Unsafe.getUnsafe().getShort(vec2, start_offset + i * Short.BYTES);
-            bits[i] = f.apply(cond, i, v1, v2);
+            short v1 = Unsafe.getUnsafe().getShort(vec1, vOffset + i * Short.BYTES);
+            short v2 = Unsafe.getUnsafe().getShort(vec2, vOffset + i * Short.BYTES);
+            Unsafe.getUnsafe().putBoolean(mbits, mOffset + i, f.apply(cond, i, v1, v2));
         }
-        return maskFactory(bits);
+        mbits = Unsafe.getUnsafe().finishPrivateBuffer(mbits);
+        return maskFactory(mbits);
     }
 
     /*package-private*/
@@ -1178,7 +1182,7 @@ public abstract class ShortVector extends AbstractVector<Short> {
     // and broadcast, but it would be more surprising not to continue
     // the obvious pattern started by unary and binary.
 
-   /**
+    /**
      * {@inheritDoc} <!--workaround-->
      * @see #lanewise(VectorOperators.Ternary,short,short,VectorMask)
      * @see #lanewise(VectorOperators.Ternary,Vector,short,VectorMask)
@@ -2588,26 +2592,14 @@ public abstract class ShortVector extends AbstractVector<Short> {
     }
 
     @ForceInline
-    private final
-    VectorShuffle<Short> toShuffle0(ShortSpecies dsp) {
+    final <F>
+    VectorShuffle<F> toShuffle0(AbstractSpecies<F> dsp) {
         short[] a = toArray();
         int[] sa = new int[a.length];
         for (int i = 0; i < a.length; i++) {
             sa[i] = (int) a[i];
         }
         return VectorShuffle.fromArray(dsp, sa, 0);
-    }
-
-    /*package-private*/
-    @ForceInline
-    final
-    VectorShuffle<Short> toShuffleTemplate(Class<?> shuffleType) {
-        ShortSpecies vsp = vspecies();
-        return VectorSupport.convert(VectorSupport.VECTOR_OP_CAST,
-                                     getClass(), short.class, length(),
-                                     shuffleType, byte.class, length(),
-                                     this, vsp,
-                                     ShortVector::toShuffle0);
     }
 
     /**
@@ -3113,11 +3105,11 @@ public abstract class ShortVector extends AbstractVector<Short> {
                                    VectorMask<Short> m) {
         ShortSpecies vsp = (ShortSpecies) species;
         if (VectorIntrinsics.indexInRange(offset, vsp.length(), a.length)) {
-            return vsp.dummyVector().fromArray0(a, offset, m, OFFSET_IN_RANGE);
+            return vsp.dummyVectorMF().fromArray0(a, offset, m, OFFSET_IN_RANGE);
         }
 
         checkMaskFromIndexSize(offset, vsp, m, 1, a.length);
-        return vsp.dummyVector().fromArray0(a, offset, m, OFFSET_OUT_OF_RANGE);
+        return vsp.dummyVectorMF().fromArray0(a, offset, m, OFFSET_OUT_OF_RANGE);
     }
 
     /**
@@ -3228,7 +3220,7 @@ public abstract class ShortVector extends AbstractVector<Short> {
                                        char[] a, int offset) {
         offset = checkFromIndexSize(offset, species.length(), a.length);
         ShortSpecies vsp = (ShortSpecies) species;
-        return vsp.dummyVector().fromCharArray0(a, offset);
+        return vsp.dummyVectorMF().fromCharArray0(a, offset);
     }
 
     /**
@@ -3261,11 +3253,11 @@ public abstract class ShortVector extends AbstractVector<Short> {
                                        VectorMask<Short> m) {
         ShortSpecies vsp = (ShortSpecies) species;
         if (VectorIntrinsics.indexInRange(offset, vsp.length(), a.length)) {
-            return vsp.dummyVector().fromCharArray0(a, offset, m, OFFSET_IN_RANGE);
+            return vsp.dummyVectorMF().fromCharArray0(a, offset, m, OFFSET_IN_RANGE);
         }
 
         checkMaskFromIndexSize(offset, vsp, m, 1, a.length);
-        return vsp.dummyVector().fromCharArray0(a, offset, m, OFFSET_OUT_OF_RANGE);
+        return vsp.dummyVectorMF().fromCharArray0(a, offset, m, OFFSET_OUT_OF_RANGE);
     }
 
     /**
@@ -3395,7 +3387,7 @@ public abstract class ShortVector extends AbstractVector<Short> {
                                            ByteOrder bo) {
         offset = checkFromIndexSize(offset, species.vectorByteSize(), ms.byteSize());
         ShortSpecies vsp = (ShortSpecies) species;
-        return vsp.dummyVector().fromMemorySegment0(ms, offset).maybeSwap(bo);
+        return vsp.dummyVectorMF().fromMemorySegment0(ms, offset).maybeSwap(bo);
     }
 
     /**
@@ -3415,7 +3407,7 @@ public abstract class ShortVector extends AbstractVector<Short> {
      * short[] ar = new short[species.length()];
      * for (int n = 0; n < ar.length; n++) {
      *     if (m.laneIsSet(n)) {
-     *         ar[n] = slice.getAtIndex(ValuaLayout.JAVA_SHORT.withBitAlignment(8), n);
+     *         ar[n] = slice.getAtIndex(ValuaLayout.JAVA_SHORT.withByteAlignment(1), n);
      *     }
      * }
      * ShortVector r = ShortVector.fromArray(species, ar, 0);
@@ -3453,11 +3445,11 @@ public abstract class ShortVector extends AbstractVector<Short> {
                                            VectorMask<Short> m) {
         ShortSpecies vsp = (ShortSpecies) species;
         if (VectorIntrinsics.indexInRange(offset, vsp.vectorByteSize(), ms.byteSize())) {
-            return vsp.dummyVector().fromMemorySegment0(ms, offset, m, OFFSET_IN_RANGE).maybeSwap(bo);
+            return vsp.dummyVectorMF().fromMemorySegment0(ms, offset, m, OFFSET_IN_RANGE).maybeSwap(bo);
         }
 
         checkMaskFromIndexSize(offset, vsp, m, 2, ms.byteSize());
-        return vsp.dummyVector().fromMemorySegment0(ms, offset, m, OFFSET_OUT_OF_RANGE).maybeSwap(bo);
+        return vsp.dummyVectorMF().fromMemorySegment0(ms, offset, m, OFFSET_OUT_OF_RANGE).maybeSwap(bo);
     }
 
     // Memory store operations
@@ -4198,9 +4190,10 @@ public abstract class ShortVector extends AbstractVector<Short> {
         private ShortSpecies(VectorShape shape,
                 Class<? extends ShortVector> vectorType,
                 Class<? extends AbstractMask<Short>> maskType,
+                Class<? extends AbstractShuffle<Short>> shuffleType,
                 Function<Object, ShortVector> vectorFactory) {
             super(shape, LaneType.of(short.class),
-                  vectorType, maskType,
+                  vectorType, maskType, shuffleType,
                   vectorFactory);
             assert(this.elementSize() == Short.SIZE);
         }
@@ -4292,7 +4285,7 @@ public abstract class ShortVector extends AbstractVector<Short> {
                     throw badElementBits(lv, v);
                 }
             }
-            return dummyVector().fromArray0(va, 0);
+            return dummyVectorMF().fromArray0(va, 0);
         }
 
         // Virtual constructors
@@ -4303,12 +4296,6 @@ public abstract class ShortVector extends AbstractVector<Short> {
             // User entry point:  Be careful with inputs.
             return ShortVector
                 .fromArray(this, (short[]) a, offset);
-        }
-
-        @ForceInline
-        @Override final
-        ShortVector dummyVector() {
-            return (ShortVector) super.dummyVector();
         }
 
         @ForceInline
@@ -4341,9 +4328,10 @@ public abstract class ShortVector extends AbstractVector<Short> {
 
         ShortVector vOpMF(VectorMask<Short> m, FVOp f) {
             short[] res = new short[laneCount()];
-            boolean[] mbits = ((AbstractMask<Short>)m).getBits();
+            VectorPayloadMF mbits = ((AbstractMask<Short>)m).getBits();
+            long mOffset = mbits.multiFieldOffset();
             for (int i = 0; i < res.length; i++) {
-                if (mbits[i]) {
+                if (Unsafe.getUnsafe().getBoolean(mbits, mOffset + i)) {
                     res[i] = f.apply(i);
                 }
             }
@@ -4422,9 +4410,8 @@ public abstract class ShortVector extends AbstractVector<Short> {
         @Override
         @ForceInline
         public final ShortVector zero() {
-            // FIXME: Enable once multi-field based MaxVector is supported.
-            //if ((Class<?>) vectorType() == ShortMaxVector.class)
-            //    return ShortMaxVector.ZERO;
+            if ((Class<?>) vectorType() == ShortMaxVector.class)
+                return ShortMaxVector.ZERO;
             switch (vectorBitSize()) {
                 case 64: return Short64Vector.ZERO;
                 case 128: return Short128Vector.ZERO;
@@ -4437,9 +4424,8 @@ public abstract class ShortVector extends AbstractVector<Short> {
         @Override
         @ForceInline
         public final ShortVector iota() {
-            // FIXME: Enable once multi-field based MaxVector is supported.
-            //if ((Class<?>) vectorType() == ShortMaxVector.class)
-            //    return ShortMaxVector.IOTA;
+            if ((Class<?>) vectorType() == ShortMaxVector.class)
+                return ShortMaxVector.IOTA;
             switch (vectorBitSize()) {
                 case 64: return Short64Vector.IOTA;
                 case 128: return Short128Vector.IOTA;
@@ -4453,9 +4439,8 @@ public abstract class ShortVector extends AbstractVector<Short> {
         @Override
         @ForceInline
         public final VectorMask<Short> maskAll(boolean bit) {
-            // FIXME: Enable once multi-field based MaxVector is supported.
-            //if ((Class<?>) vectorType() == ShortMaxVector.class)
-            //    return ShortMaxVector.ShortMaxMask.maskAll(bit);
+            if ((Class<?>) vectorType() == ShortMaxVector.class)
+                return ShortMaxVector.ShortMaxMask.maskAll(bit);
             switch (vectorBitSize()) {
                 case 64: return Short64Vector.Short64Mask.maskAll(bit);
                 case 128: return Short128Vector.Short128Mask.maskAll(bit);
@@ -4490,8 +4475,7 @@ public abstract class ShortVector extends AbstractVector<Short> {
             case VectorShape.SK_128_BIT: return (ShortSpecies) SPECIES_128;
             case VectorShape.SK_256_BIT: return (ShortSpecies) SPECIES_256;
             case VectorShape.SK_512_BIT: return (ShortSpecies) SPECIES_512;
-            // FIXME: Enable once multi-field based MaxVector is supported.
-            //case VectorShape.SK_Max_BIT: return (ShortSpecies) SPECIES_MAX;
+            case VectorShape.SK_Max_BIT: return (ShortSpecies) SPECIES_MAX;
             default: throw new IllegalArgumentException("Bad shape: " + s);
         }
     }
@@ -4501,6 +4485,7 @@ public abstract class ShortVector extends AbstractVector<Short> {
         = new ShortSpecies(VectorShape.S_64_BIT,
                             Short64Vector.class,
                             Short64Vector.Short64Mask.class,
+                            Short64Vector.Short64Shuffle.class,
                             Short64Vector::new);
 
     /** Species representing {@link ShortVector}s of {@link VectorShape#S_128_BIT VectorShape.S_128_BIT}. */
@@ -4508,6 +4493,7 @@ public abstract class ShortVector extends AbstractVector<Short> {
         = new ShortSpecies(VectorShape.S_128_BIT,
                             Short128Vector.class,
                             Short128Vector.Short128Mask.class,
+                            Short128Vector.Short128Shuffle.class,
                             Short128Vector::new);
 
     /** Species representing {@link ShortVector}s of {@link VectorShape#S_256_BIT VectorShape.S_256_BIT}. */
@@ -4515,6 +4501,7 @@ public abstract class ShortVector extends AbstractVector<Short> {
         = new ShortSpecies(VectorShape.S_256_BIT,
                             Short256Vector.class,
                             Short256Vector.Short256Mask.class,
+                            Short256Vector.Short256Shuffle.class,
                             Short256Vector::new);
 
     /** Species representing {@link ShortVector}s of {@link VectorShape#S_512_BIT VectorShape.S_512_BIT}. */
@@ -4522,16 +4509,16 @@ public abstract class ShortVector extends AbstractVector<Short> {
         = new ShortSpecies(VectorShape.S_512_BIT,
                             Short512Vector.class,
                             Short512Vector.Short512Mask.class,
+                            Short512Vector.Short512Shuffle.class,
                             Short512Vector::new);
 
     /** Species representing {@link ShortVector}s of {@link VectorShape#S_Max_BIT VectorShape.S_Max_BIT}. */
-    // FIXME: Enable once multi-field based MaxVector is supported.
-    /*public static final VectorSpecies<Short> SPECIES_MAX
+    public static final VectorSpecies<Short> SPECIES_MAX
         = new ShortSpecies(VectorShape.S_Max_BIT,
                             ShortMaxVector.class,
                             ShortMaxVector.ShortMaxMask.class,
+                            ShortMaxVector.ShortMaxShuffle.class,
                             ShortMaxVector::new);
-     */
 
     /**
      * Preferred species for {@link ShortVector}s.

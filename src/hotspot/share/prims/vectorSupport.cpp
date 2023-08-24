@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,10 +25,12 @@
 #include "precompiled.hpp"
 #include "classfile/javaClasses.inline.hpp"
 #include "classfile/vmClasses.hpp"
+#include "classfile/vmClassMacros.hpp"
 #include "classfile/vmSymbols.hpp"
 #include "code/location.hpp"
 #include "jni.h"
 #include "jvm.h"
+#include "oops/fieldStreams.inline.hpp"
 #include "oops/klass.inline.hpp"
 #include "oops/typeArrayOop.inline.hpp"
 #include "prims/vectorSupport.hpp"
@@ -38,6 +40,8 @@
 #include "runtime/interfaceSupport.inline.hpp"
 #include "runtime/jniHandles.inline.hpp"
 #include "runtime/stackValue.hpp"
+#include "runtime/deoptimization.hpp"
+#include "utilities/debug.hpp"
 #ifdef COMPILER2
 #include "opto/matcher.hpp"
 #endif // COMPILER2
@@ -69,133 +73,13 @@ bool VectorSupport::is_vector(Klass* klass) {
   return klass->is_subclass_of(vmClasses::vector_VectorPayload_klass());
 }
 
-bool VectorSupport::is_vector_mask(Klass* klass) {
-  return klass->is_subclass_of(vmClasses::vector_VectorMask_klass());
+bool VectorSupport::is_vector_payload_mf(Klass* klass) {
+  return klass->is_subclass_of(vmClasses::vector_VectorPayloadMF_klass());
 }
 
-bool VectorSupport::is_vector_shuffle(Klass* klass) {
-  return klass->is_subclass_of(vmClasses::vector_VectorShuffle_klass());
-}
-
-BasicType VectorSupport::klass2bt(InstanceKlass* ik) {
-  assert(ik->is_subclass_of(vmClasses::vector_VectorPayload_klass()), "%s not a VectorPayload", ik->name()->as_C_string());
-  fieldDescriptor fd; // find_field initializes fd if found
-  // static final Class<?> ETYPE;
-  Klass* holder = ik->find_field(vmSymbols::ETYPE_name(), vmSymbols::class_signature(), &fd);
-
-  assert(holder != NULL, "sanity");
-  assert(fd.is_static(), "");
-  assert(fd.offset() > 0, "");
-
-  if (is_vector_shuffle(ik)) {
-    return T_BYTE;
-  } else if (is_vector_mask(ik)) {
-    return T_BOOLEAN;
-  } else { // vector and mask
-    oop value = ik->java_mirror()->obj_field(fd.offset());
-    BasicType elem_bt = java_lang_Class::as_BasicType(value);
-    return elem_bt;
-  }
-}
-
-jint VectorSupport::klass2length(InstanceKlass* ik) {
-  fieldDescriptor fd; // find_field initializes fd if found
-  // static final int VLENGTH;
-  Klass* holder = ik->find_field(vmSymbols::VLENGTH_name(), vmSymbols::int_signature(), &fd);
-
-  assert(holder != NULL, "sanity");
-  assert(fd.is_static(), "");
-  assert(fd.offset() > 0, "");
-
-  jint vlen = ik->java_mirror()->int_field(fd.offset());
-  assert(vlen > 0, "");
-  return vlen;
-}
-
-// Masks require special handling: when boxed they are packed and stored in boolean
-// arrays, but in scalarized form they have the same size as corresponding vectors.
-// For example, Int512Mask is represented in memory as boolean[16], but
-// occupies the whole 512-bit vector register when scalarized.
-// During scalarization inserting a VectorStoreMask node between mask
-// and safepoint node always ensures the existence of masks in a boolean array.
-
-void VectorSupport::init_payload_element(typeArrayOop arr, BasicType elem_bt, int index, address addr) {
-  switch (elem_bt) {
-    case T_BOOLEAN: arr->bool_at_put(index, *(jboolean*)addr); break;
-    case T_BYTE:    arr->byte_at_put(index, *(jbyte*)addr); break;
-    case T_SHORT:   arr->short_at_put(index, *(jshort*)addr); break;
-    case T_INT:     arr->int_at_put(index, *(jint*)addr); break;
-    case T_FLOAT:   arr->float_at_put(index, *(jfloat*)addr); break;
-    case T_LONG:    arr->long_at_put(index, *(jlong*)addr); break;
-    case T_DOUBLE:  arr->double_at_put(index, *(jdouble*)addr); break;
-    default: fatal("unsupported: %s", type2name(elem_bt));
-  }
-}
-
-Handle VectorSupport::allocate_vector_payload_helper(InstanceKlass* ik, frame* fr, RegisterMap* reg_map, Location location, TRAPS) {
-  int num_elem = klass2length(ik);
-  BasicType elem_bt = klass2bt(ik);
-  int elem_size = type2aelembytes(elem_bt);
-
-  // On-heap vector values are represented as primitive arrays.
-  TypeArrayKlass* tak = TypeArrayKlass::cast(Universe::typeArrayKlassObj(elem_bt));
-
-  typeArrayOop arr = tak->allocate(num_elem, CHECK_NH); // safepoint
-
-  if (location.is_register()) {
-    // Value was in a callee-saved register.
-    VMReg vreg = VMRegImpl::as_VMReg(location.register_number());
-
-    for (int i = 0; i < num_elem; i++) {
-      int vslot = (i * elem_size) / VMRegImpl::stack_slot_size;
-      int off   = (i * elem_size) % VMRegImpl::stack_slot_size;
-
-      address elem_addr = reg_map->location(vreg, vslot) + off; // assumes little endian element order
-      init_payload_element(arr, elem_bt, i, elem_addr);
-    }
-  } else {
-    // Value was directly saved on the stack.
-    address base_addr = ((address)fr->unextended_sp()) + location.stack_offset();
-    for (int i = 0; i < num_elem; i++) {
-      init_payload_element(arr, elem_bt, i, base_addr + i * elem_size);
-    }
-  }
-  return Handle(THREAD, arr);
-}
-
-Handle VectorSupport::allocate_vector_payload(InstanceKlass* ik, frame* fr, RegisterMap* reg_map, ScopeValue* payload, TRAPS) {
-  if (payload->is_location()) {
-    Location location = payload->as_LocationValue()->location();
-    if (location.type() == Location::vector) {
-      // Vector value in an aligned adjacent tuple (1, 2, 4, 8, or 16 slots).
-      return allocate_vector_payload_helper(ik, fr, reg_map, location, THREAD); // safepoint
-    }
-#ifdef ASSERT
-    // Other payload values are: 'oop' type location and scalar-replaced boxed vector representation.
-    // They will be processed in Deoptimization::reassign_fields() after all objects are reallocated.
-    else {
-      Location::Type loc_type = location.type();
-      assert(loc_type == Location::oop || loc_type == Location::narrowoop,
-             "expected 'oop'(%d) or 'narrowoop'(%d) types location but got: %d", Location::oop, Location::narrowoop, loc_type);
-    }
-  } else if (!payload->is_object() && !payload->is_constant_oop()) {
-    stringStream ss;
-    payload->print_on(&ss);
-    assert(false, "expected 'object' value for scalar-replaced boxed vector but got: %s", ss.freeze());
-#endif
-  }
-  return Handle(THREAD, nullptr);
-}
-
-instanceOop VectorSupport::allocate_vector(InstanceKlass* ik, frame* fr, RegisterMap* reg_map, ObjectValue* ov, TRAPS) {
-  assert(is_vector(ik), "%s not a vector", ik->name()->as_C_string());
-  assert(ov->field_size() == 1, "%s not a vector", ik->name()->as_C_string());
-
-  ScopeValue* payload_value = ov->field_at(0);
-  Handle payload_instance = VectorSupport::allocate_vector_payload(ik, fr, reg_map, payload_value, CHECK_NULL);
-  instanceOop vbox = ik->allocate_instance(CHECK_NULL);
-  vector_VectorPayload::set_payload(vbox, payload_instance());
-  return vbox;
+bool VectorSupport::skip_value_scalarization(Klass* klass) {
+  return VectorSupport::is_vector(klass) ||
+         VectorSupport::is_vector_payload_mf(klass);
 }
 
 #ifdef COMPILER2

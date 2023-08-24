@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,6 +32,7 @@ import java.nio.ByteOrder;
 import java.util.function.IntUnaryOperator;
 
 import static jdk.incubator.vector.VectorOperators.*;
+import static jdk.internal.vm.vector.VectorSupport.*;
 
 @SuppressWarnings({"cast", "missing-explicit-ctor"})
 abstract class AbstractVector<E> extends Vector<E> {
@@ -69,6 +70,9 @@ abstract class AbstractVector<E> extends Vector<E> {
     static final int OFFSET_OUT_OF_RANGE = 0;
 
     // Extractors
+
+    /*package-private*/
+    abstract VectorPayloadMF vec();
 
     /*package-private*/
     abstract AbstractSpecies<E> vspecies();
@@ -144,7 +148,7 @@ abstract class AbstractVector<E> extends Vector<E> {
     private boolean sameSpecies(VectorSpecies<?> species) {
         // It's simpler and faster to do a class check,
         // even if you have to load a dummy vector.
-        AbstractVector<?> other = ((AbstractSpecies<?>)species).dummyVector();
+        AbstractVector<?> other = ((AbstractSpecies<?>)species).dummyVectorMF();
         boolean same = (this.getClass() == other.getClass());
         // Make sure it works, too!
         assert(same == (this.species() == species)) : same;
@@ -179,19 +183,72 @@ abstract class AbstractVector<E> extends Vector<E> {
 
     /*package-private*/
     @ForceInline
+    static <F> VectorPayloadMF createPayloadInstance(AbstractSpecies<F> species) {
+        boolean isMaxShape = species.vectorShape == VectorShape.S_Max_BIT;
+        Class<?> etype = species.elementType();
+        int length = species.laneCount();
+        return VectorPayloadMF.newInstanceFactory(etype, length, isMaxShape, false);
+    }
+
+    /*package-private*/
+    @ForceInline
     ByteVector asByteVectorRawTemplate() {
         return (ByteVector) asVectorRawTemplate(LaneType.BYTE);
     }
 
+    abstract AbstractMask<E> maskFromPayload(VectorPayloadMF payload);
 
-    abstract AbstractMask<E> maskFromArray(boolean[] bits);
+    abstract <F> VectorShuffle<F> toShuffle(AbstractSpecies<F> dsp);
 
-    abstract AbstractShuffle<E> iotaShuffle();
+    /*package-private*/
+    @ForceInline
+    final <F> VectorShuffle<F> toShuffleTemplate(AbstractSpecies<F> dsp) {
+        Class<?> etype = vspecies().elementType();
+        Class<?> dvtype = dsp.shuffleType();
+        Class<?> dtype = dsp.asIntegral().elementType();
+        int dlength = dsp.dummyVectorMF().length();
+        return VectorSupport.convert(VectorSupport.VECTOR_OP_CAST,
+                                     getClass(), etype, length(),
+                                     dvtype, dtype, dlength,
+                                     this, dsp,
+                                     AbstractVector::toShuffle0);
+    }
 
-    abstract AbstractShuffle<E> iotaShuffle(int start, int step, boolean wrap);
+    abstract <F> VectorShuffle<F> toShuffle0(AbstractSpecies<F> dsp);
 
-    /*do not alias this byte array*/
-    abstract AbstractShuffle<E> shuffleFromBytes(byte[] reorder);
+    @ForceInline
+    public final
+    VectorShuffle<E> toShuffle() {
+        return toShuffle(vspecies());
+    }
+
+    abstract VectorShuffle<E> iotaShuffle();
+
+    @ForceInline
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    final VectorShuffle<E> iotaShuffle(int start, int step, boolean wrap) {
+        if (start == 0 && step == 1) {
+            return iotaShuffle();
+        }
+
+        if ((length() & (length() - 1)) != 0) {
+            return wrap ? shuffleFromOp(i -> (VectorIntrinsics.wrapToRange(i * step + start, length())))
+                        : shuffleFromOp(i -> i * step + start);
+        }
+
+        AbstractSpecies<?> species = vspecies().asIntegral();
+        Vector iota = species.iota();
+        iota = iota.lanewise(VectorOperators.MUL, step)
+                   .lanewise(VectorOperators.ADD, start);
+        Vector wrapped = iota.lanewise(VectorOperators.AND, length() - 1);
+
+        if (!wrap) {
+            Vector wrappedEx = wrapped.lanewise(VectorOperators.SUB, length());
+            VectorMask<?> mask = wrapped.compare(VectorOperators.EQ, iota);
+            wrapped = wrappedEx.blend(wrapped, mask);
+        }
+        return ((AbstractVector) wrapped).toShuffle(vspecies());
+    }
 
     abstract AbstractShuffle<E> shuffleFromArray(int[] indexes, int i);
 
